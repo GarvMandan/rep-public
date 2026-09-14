@@ -81,19 +81,19 @@ All authenticated routes take `Authorization: Bearer <token>`.
 | POST | `/friends/:id/accept` | accept a request |
 | DELETE | `/friends/:id` | unfriend |
 | GET | `/feed` | your workouts + friends', newest first |
-| POST |  | toggle kudos |
-| POST |  | confirm an email from a link token |
-| POST |  | send a fresh verification email |
-| POST |  | request a password reset link |
-| POST |  | set a new password from a link token |
-| GET |  | who sent an invite (no auth needed) |
-| POST |  | create an invite, optionally emailed |
-| POST |  | accept an invite and become friends |
-| GET |  | invites you have sent |
+| POST | `/sessions/:id/kudos` | toggle kudos |
+| POST | `/auth/verify` | confirm an email from a link token |
+| POST | `/auth/resend-verification` | send a fresh verification email |
+| POST | `/auth/forgot` | request a password reset link |
+| POST | `/auth/reset` | set a new password from a link token |
+| GET | `/invites/peek?code=` | who sent an invite (no auth needed) |
+| POST | `/invites` | create an invite, optionally emailed |
+| POST | `/invites/accept` | accept an invite and become friends |
+| GET | `/invites` | invites you have sent |
 
-Social routes (, , kudos) and creating invites
-require a verified email. The feed does not — an unverified user still sees
-their own workouts, which is how the app shows what verifying unlocks.
+Social routes (`/users/search`, `/friends`, kudos) and creating invites require
+a verified email. The feed does not — an unverified user still sees their own
+workouts, which is how the app shows what verifying unlocks.
 
 ## Security decisions worth knowing
 
