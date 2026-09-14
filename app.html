@@ -2363,7 +2363,7 @@ root.addEventListener('click', async (e) => {
         const r = await api.resendVerification();
         authNotice = r.sent
           ? 'Sent. Check your inbox, including spam.'
-          : 'Email is not configured on the server yet — see the setup notes.';
+          : (r.message || 'Could not send the email just now.');
       } catch (err) {
         authNotice = err.offline ? 'You are offline right now.' : err.message;
       } finally { authBusy = false; render(); }

@@ -123,3 +123,48 @@ npm test
 
 Covers password hashing, token handling, input validation, and every anti-cheat
 path in the session summarizer.
+
+## Email delivery
+
+`RESEND_API_KEY` is set as a Worker secret. Verified working — sends succeed.
+
+**One limitation until a domain is verified:** Resend's test mode only delivers
+to the account owner's address (`garvmandan@gmail.com`), exactly. Anything else,
+including `+tag` variants of that same address, comes back:
+
+```
+403 validation_error — You can only send testing emails to your own email
+address. To send emails to other recipients, please verify a domain.
+```
+
+So today, signing up with any other address creates a working account but no
+verification email arrives. The API reports this rather than failing silently:
+`/auth/resend-verification` returns a `reason` of `domain-not-verified` and a
+message the app shows to the user.
+
+### Lifting the restriction
+
+You need a domain you control — a cheap `.com` is a few pounds a year.
+
+1. [resend.com/domains](https://resend.com/domains) → **Add Domain**
+2. Add the DNS records it gives you (SPF, DKIM) at your registrar
+3. Wait for it to show **Verified**
+4. Point the sender at it:
+   ```bash
+   # in wrangler.toml
+   EMAIL_FROM = "Progressive Overload <hello@yourdomain.com>"
+   ```
+5. `npm run deploy`
+
+After that, anyone can sign up and receive verification and invite emails.
+
+### Rotating the key
+
+If the key is ever exposed, revoke it at
+[resend.com/api-keys](https://resend.com/api-keys), create a new one, then:
+
+```bash
+npx wrangler secret put RESEND_API_KEY
+```
+
+The prompt hides the value, so it never lands in a shell history or a log.

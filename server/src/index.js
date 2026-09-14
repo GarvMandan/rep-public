@@ -346,10 +346,21 @@ async function handleVerify(request, env, ctx) {
   return json({ ok: true, user: publicUser(user) }, ctx);
 }
 
+const EMAIL_PROBLEMS = {
+  'not-configured': 'Email is not set up on the server yet.',
+  'domain-not-verified': 'The email service is still in test mode and can only reach the owner’s address.',
+};
+
 async function handleResendVerification(user, env, ctx) {
   if (user.email_verified) return json({ ok: true, already: true }, ctx);
   const r = await sendVerification(env, user);
-  return json({ ok: true, sent: r.sent, reason: r.skipped || r.error || null }, ctx);
+  const code = r.skipped || r.error || null;
+  return json({
+    ok: true,
+    sent: r.sent,
+    reason: code,
+    message: r.sent ? null : (EMAIL_PROBLEMS[code] || 'Could not send the email just now.'),
+  }, ctx);
 }
 
 // ── Password reset ────────────────────────────────────────────────────────

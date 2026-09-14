@@ -34,6 +34,13 @@ export async function send(env, { to, subject, html, text }) {
     if (!res.ok) {
       const detail = await res.text();
       console.error(`[email] ${res.status} sending "${subject}": ${detail.slice(0, 300)}`);
+
+      // Resend refuses to mail anyone but the account owner until a sending
+      // domain is verified. Name that specifically — otherwise it looks like a
+      // bug rather than a setup step nobody has done yet.
+      if (res.status === 403 && detail.includes('verify a domain')) {
+        return { sent: false, error: 'domain-not-verified' };
+      }
       return { sent: false, error: `Provider returned ${res.status}` };
     }
     return { sent: true };
