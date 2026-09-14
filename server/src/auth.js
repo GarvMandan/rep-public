@@ -4,7 +4,11 @@
 // at OWASP's recommended iteration count. Every comparison that touches a secret
 // is constant-time.
 
-const ITERATIONS = 210_000; // OWASP 2023 guidance for PBKDF2-SHA256
+// OWASP 2023 recommends 600k iterations for PBKDF2-SHA256, but the Workers
+// runtime hard-caps it at 100k (NotSupportedError above that), so this is the
+// strongest value the platform allows. `password_iter` is stored per user, so
+// raising it later re-hashes new passwords without invalidating existing ones.
+const ITERATIONS = 100_000;
 const KEY_LEN = 32;
 
 const enc = new TextEncoder();
@@ -28,14 +32,17 @@ function timingSafeEqual(a, b) {
 }
 
 export async function hashPassword(password, salt = null, iterations = ITERATIONS) {
+  // Clamp rather than throw: a record written by another runtime with a higher
+  // count must still be verifiable here instead of locking the user out.
+  const rounds = Math.min(Number(iterations) || ITERATIONS, ITERATIONS);
   const saltBytes = salt ? fromHex(salt) : crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: saltBytes, iterations },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: saltBytes, iterations: rounds },
     key,
     KEY_LEN * 8
   );
-  return { hash: toHex(bits), salt: toHex(saltBytes), iterations };
+  return { hash: toHex(bits), salt: toHex(saltBytes), iterations: rounds };
 }
 
 export async function verifyPassword(password, stored) {

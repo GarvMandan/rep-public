@@ -8,7 +8,7 @@ compatibility_date = "2024-09-23"
 [[d1_databases]]
 binding = "DB"
 database_name = "progressive-overload"
-database_id = "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+database_id = "8b5a9fe3-caa9-47da-9f9a-921a5be86645"
 
 [vars]
 # Comma-separated. The first entry is the fallback for non-browser callers.

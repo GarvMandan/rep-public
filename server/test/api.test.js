@@ -20,7 +20,7 @@ const test = (name, fn) => tests.push([name, fn]);
 test('hashes a password and verifies it', async () => {
   const stored = await hashPassword('correct horse battery staple');
   assert.ok(stored.hash && stored.salt);
-  assert.equal(stored.iterations, 210_000);
+  assert.equal(stored.iterations, 100_000, 'the Workers runtime caps PBKDF2 at 100k');
   assert.ok(await verifyPassword('correct horse battery staple', stored));
 });
 
@@ -41,6 +41,16 @@ test('verification is safe against malformed stored records', async () => {
   assert.equal(await verifyPassword('x', null), false);
   assert.equal(await verifyPassword('x', {}), false);
   assert.equal(await verifyPassword('x', { hash: 'abc' }), false);
+});
+
+test('iteration counts are clamped to what the runtime supports', async () => {
+  // The Workers runtime throws NotSupportedError above 100k. A record written
+  // elsewhere with a higher count must still verify rather than locking the
+  // user out of their account.
+  const stored = await hashPassword('somepassword', null, 500_000);
+  assert.equal(stored.iterations, 100_000, 'clamped on write');
+  assert.ok(await verifyPassword('somepassword', { ...stored, iterations: 500_000 }),
+    'and clamped on read, so an over-spec record still verifies');
 });
 
 test('the raw password never appears in what is stored', async () => {
