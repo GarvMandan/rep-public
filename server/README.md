@@ -175,7 +175,7 @@ You need a domain you control — a cheap `.com` is a few pounds a year.
 4. Point the sender at it:
    ```bash
    # in wrangler.toml
-   EMAIL_FROM = "Progressive Overload <hello@yourdomain.com>"
+   EMAIL_FROM = "Rep Public <hello@yourdomain.com>"
    ```
 5. `npm run deploy`
 

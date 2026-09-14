@@ -1,4 +1,4 @@
-# Progressive Overload — iPhone app
+# Rep Public — iPhone app
 
 The native app. Same engine as the web version: it imports `../core/*.js` directly rather
 than copying it, so there is exactly one progression algorithm, one exercise catalog, and

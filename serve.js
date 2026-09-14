@@ -54,7 +54,7 @@ createServer(async (req, res) => {
     .flat()
     .find((n) => n && n.family === 'IPv4' && !n.internal)?.address;
 
-  console.log(`\n  Progressive Overload`);
+  console.log(`\n  Rep Public`);
   console.log(`  →  http://localhost:${PORT}`);
   if (lan) console.log(`  →  http://${lan}:${PORT}   (open this one on your phone)`);
   console.log(`\n  Ctrl+C to stop.\n`);

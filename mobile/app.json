@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "Progressive Overload",
-    "slug": "progressive-overload",
+    "name": "Rep Public",
+    "slug": "rep-public",
     "version": "0.1.0",
     "orientation": "portrait",
-    "scheme": "progressiveoverload",
+    "scheme": "reppublic",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#12151A",
     "splash": {
@@ -14,13 +14,13 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.garv.progressiveoverload",
+      "bundleIdentifier": "com.garv.reppublic",
       "infoPlist": {
         "UIUserInterfaceStyle": "Dark"
       }
     },
     "android": {
-      "package": "com.garv.progressiveoverload",
+      "package": "com.garv.reppublic",
       "adaptiveIcon": {
         "backgroundColor": "#12151A"
       }

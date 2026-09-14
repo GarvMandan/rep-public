@@ -8,7 +8,7 @@
 // Bump CACHE when shipping a change. The old cache is deleted on activate, and
 // clients are claimed immediately so the new version takes effect on next load.
 
-const CACHE = 'overload-v4';
+const CACHE = 'reppublic-v5';
 
 const ASSETS = [
   './',

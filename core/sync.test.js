@@ -240,6 +240,92 @@ test('local sessions are uploaded to the server', async () => {
   assert.equal(upload.body.sessions.length, 1);
 });
 
+// These four cover the bug where every sync silently deleted custom workouts:
+// the merge adopted remote unconditionally, discarding unsynced local edits.
+test('a custom workout created after the first sync is not wiped', async () => {
+  const srv = fakeServer({ state: null, version: 0 });
+  const store = await localStore();
+  const api = createApi({ baseUrl: 'https://api.test', tokenStore: memoryTokenStore('t') });
+  const sync = createSync({ api, store });
+
+  await sync.run();                       // baseline is now on the server
+
+  const day = await store.addDay('Grip & Core', ['core']);
+  await store.addExerciseToDay(day.id, 'farmers-walk');
+  await store.assignDay('Thu', day.id);
+
+  await sync.run();                       // the sync that used to destroy it
+
+  const plan = store.getState().plan;
+  assert.ok(plan.days.some((d) => d.name === 'Grip & Core'), 'the custom workout survived');
+  assert.ok(plan.week.Thu, 'and is still scheduled');
+  assert.ok(
+    srv.stored.plan.days.some((d) => d.name === 'Grip & Core'),
+    'and reached the server'
+  );
+});
+
+test('edits to a preset day survive a sync', async () => {
+  const srv = fakeServer({ state: null, version: 0 });
+  const store = await localStore();
+  const api = createApi({ baseUrl: 'https://api.test', tokenStore: memoryTokenStore('t') });
+  const sync = createSync({ api, store });
+  await sync.run();
+
+  const legs = store.getState().plan.days.find((d) => d.name === 'Legs');
+  await store.renameDay(legs.id, 'Quad Day');
+  await store.pinDay(legs.id);
+  await store.addExerciseToDay(legs.id, 'hip-thrust');
+
+  await sync.run();
+
+  const after = store.getState().plan.days.find((d) => d.id === legs.id);
+  assert.equal(after.name, 'Quad Day', 'rename survived');
+  assert.ok(after.exercises.some((x) => x.exerciseId === 'hip-thrust'), 'added exercise survived');
+});
+
+test('with no local edits, the remote plan is still adopted', async () => {
+  // The other half of the rule: a device that has changed nothing should pick
+  // up what another device did.
+  const seeded = await localStore();
+  const remoteDay = { id: 'd_remote', name: 'From Phone', muscles: [], slots: [], exercises: [], templateId: null };
+  const remoteDoc = {
+    schemaVersion: 2, profile: PROFILE,
+    plan: { ...seeded.getState().plan, days: [...seeded.getState().plan.days, remoteDay] },
+    inventory: seeded.getState().inventory,
+    exerciseState: {}, sessions: [], bodyweightLog: [],
+  };
+  fakeServer({ state: remoteDoc, version: 5 });
+
+  const store = await localStore();
+  await store.markSynced();               // nothing pending on this device
+
+  const api = createApi({ baseUrl: 'https://api.test', tokenStore: memoryTokenStore('t') });
+  await createSync({ api, store }).run();
+
+  assert.ok(
+    store.getState().plan.days.some((d) => d.name === 'From Phone'),
+    'the other device’s workout arrived'
+  );
+});
+
+test('syncing twice with no changes in between is stable', async () => {
+  const srv = fakeServer({ state: null, version: 0 });
+  const store = await localStore();
+  const api = createApi({ baseUrl: 'https://api.test', tokenStore: memoryTokenStore('t') });
+  const sync = createSync({ api, store });
+
+  const day = await store.addDay('Custom', []);
+  await store.addExerciseToDay(day.id, 'squat');
+
+  await sync.run();
+  const first = JSON.stringify(store.getState().plan);
+  await sync.run();
+  const second = JSON.stringify(store.getState().plan);
+
+  assert.equal(first, second, 'a no-op sync must not mutate the plan');
+});
+
 test('preferLocal overwrites the server instead of adopting remote', async () => {
   const seeded = await localStore();
   const remoteDoc = {

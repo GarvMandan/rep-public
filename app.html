@@ -1,4 +1,4 @@
-<title>Progressive Overload</title>
+<title>Rep Public</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 
 <!-- Installable to the home screen. iOS ignores the manifest for some of this,
@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#12151A">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Overload">
+<meta name="apple-mobile-web-app-title" content="Rep Public">
 <link rel="apple-touch-icon" href="./icons/icon-180.png">
 <link rel="icon" href="./icons/icon-192.png">
 
@@ -255,6 +255,17 @@ h3 { font-family: var(--display); font-size: 18px; font-weight: 600; letter-spac
 }
 .weight small { font-size: 17px; font-weight: 600; color: var(--faint); letter-spacing: .06em; margin-left: 4px; }
 .loadcue { text-align: center; margin: 8px 0 2px; }
+
+/* The weight doubles as a button — the +/- steps are fine for one increment,
+   but typing is the only sane way to correct a badly-off starting weight. */
+.weight { background: none; border: none; cursor: pointer; padding: 0; }
+.weight:hover { color: var(--accent); }
+.tapweight {
+  text-align: center; font-size: 11px; color: var(--faint);
+  letter-spacing: .06em; margin-top: 2px;
+}
+.jumpgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.jumpgrid .chip { text-align: center; padding: 11px 4px; font-variant-numeric: tabular-nums; }
 .targetline { text-align: center; color: var(--muted); font-size: 14px; margin-top: 6px; }
 .targetline b { color: var(--ink); font-family: var(--display); font-size: 19px; font-weight: 700; }
 
@@ -969,9 +980,12 @@ function renderLive(st) {
 
           <div class="weightline">
             <button class="wbtn" data-act="w-" aria-label="Decrease weight">−</button>
-            <div class="weight">${ex.bodyweightLoad && cur.weight === 0 ? 'BW' : fmtW(cur.weight)}<small>${ex.bodyweightLoad && cur.weight === 0 ? '' : 'LB'}</small></div>
+            <button class="weight" data-act="set-weight" aria-label="Type an exact weight">
+              ${ex.bodyweightLoad && cur.weight === 0 ? 'BW' : fmtW(cur.weight)}<small>${ex.bodyweightLoad && cur.weight === 0 ? '' : 'LB'}</small>
+            </button>
             <button class="wbtn" data-act="w+" aria-label="Increase weight">+</button>
           </div>
+          <div class="tapweight">tap the weight to type it</div>
           <div class="loadcue">${hintHTML(hint)}</div>
           <div class="targetline">aim for <b>${cur.targetReps}</b> reps</div>
 
@@ -1193,7 +1207,7 @@ function renderAuthGate() {
   const isUp = authMode === 'signup';
 
   return `
-    <div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>
+    <div class="topbar"><div class="wordmark">REP<span>·</span>PUBLIC</div></div>
     <div class="stack" style="padding-top:8px">
       ${pendingInvite ? `
         <div class="card" style="background:rgba(228,255,58,.07);border:1px solid var(--accent)">
@@ -1328,6 +1342,65 @@ function sheetAccount(st) {
       <button class="btn btn-ghost btn-block btn-danger" data-act="signout">Sign out</button>
       <p class="sm muted" style="margin:0">
         Signing out leaves your training data on this device. It stays in your account too.
+      </p>
+    </div>`;
+}
+
+/**
+ * Type an exact weight.
+ *
+ * The ± buttons are fine for one increment, but useless when the seeded weight
+ * is 50 lb off what you actually lift — that would be ten taps. This gives a
+ * keypad plus jumps sized to the lift's own increment.
+ */
+function sheetWeight(st) {
+  const ex = st.activeSession?.exercises[activeEx];
+  if (!ex) return sheetHead('No active set');
+  const setIdx = ex.sets.findIndex((x) => !x.done);
+  if (setIdx < 0) return sheetHead('All sets logged');
+
+  const cur = ex.sets[setIdx];
+  const inc = ex.increment || 5;
+  const draftWeight = sheet.value != null ? sheet.value : cur.weight;
+  const hint = store.hintFor(Number(draftWeight) || 0, ex.loading);
+
+  // Jumps scaled to this lift: a squat moves in 10s and 25s, a lateral raise
+  // in 2.5s and 5s.
+  const jumps = [inc, inc * 2, inc * 5, inc * 10];
+
+  return `
+    ${sheetHead(ex.name, `Set ${setIdx + 1} of ${ex.sets.length}`)}
+    <div class="stack">
+      <div class="field">
+        <label for="w-input">Weight (lb)</label>
+        <input id="w-input" type="number" inputmode="decimal" step="${inc}" min="0"
+               value="${draftWeight}" data-act="weight-input"
+               style="font-size:28px;font-family:var(--display);font-weight:700;text-align:center;padding:16px">
+      </div>
+
+      <div class="loadcue" style="text-align:center">${hintHTML(hint)}</div>
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:7px">Quick adjust</div>
+        <div class="jumpgrid">
+          ${jumps.map((j) => `
+            <button class="chip" data-act="weight-jump" data-v="-${j}">−${fmtW(j)}</button>`).join('')}
+        </div>
+        <div class="jumpgrid" style="margin-top:6px">
+          ${jumps.map((j) => `
+            <button class="chip" data-act="weight-jump" data-v="${j}">+${fmtW(j)}</button>`).join('')}
+        </div>
+      </div>
+
+      ${ex.bodyweightLoad ? `
+        <button class="btn btn-ghost btn-sm" data-act="weight-set" data-v="0">Bodyweight only</button>` : ''}
+
+      <button class="btn btn-primary btn-block" data-act="weight-apply">
+        Use ${fmtW(Number(draftWeight) || 0)} lb
+      </button>
+      <p class="sm muted" style="margin:0">
+        Applies to this set and the rest of this exercise. Next week's weight is
+        learned from what you actually lift.
       </p>
     </div>`;
 }
@@ -1574,6 +1647,7 @@ function renderSheet(st) {
     session: sheetSession,
     account: sheetAccount,
     invite: sheetInvite,
+    weight: sheetWeight,
     friends: sheetFriends,
   }[sheet.kind];
   if (!body) return '';
@@ -1919,12 +1993,12 @@ function render() {
   // session persists and everything below works offline.
   if (CLOUD_ENABLED && !authResolved) {
     root.innerHTML = `
-      <div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>
+      <div class="topbar"><div class="wordmark">REP<span>·</span>PUBLIC</div></div>
       <div class="empty"><h2>Loading…</h2></div>`;
   } else if (CLOUD_ENABLED && !account) {
     root.innerHTML = renderAuthGate();
   } else if (!st.profile) {
-    root.innerHTML = `<div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>${renderSetup()}`;
+    root.innerHTML = `<div class="topbar"><div class="wordmark">REP<span>·</span>PUBLIC</div></div>${renderSetup()}`;
   } else {
     const inSession = !!st.activeSession;
     const body =
@@ -2254,6 +2328,44 @@ root.addEventListener('click', async (e) => {
       await store.overrideWeight(activeEx, setIdx, next);
       render(); break;
     }
+    // ── Typing an exact weight ──
+    case 'set-weight': {
+      const ex = st.activeSession?.exercises[activeEx];
+      const setIdx = ex?.sets.findIndex((x) => !x.done) ?? -1;
+      if (setIdx < 0) break;
+      openSheet({ kind: 'weight', value: ex.sets[setIdx].weight });
+      // Select the field so typing replaces rather than appends.
+      setTimeout(() => root.querySelector('#w-input')?.select(), 60);
+      break;
+    }
+    case 'weight-jump': {
+      const ex = st.activeSession.exercises[activeEx];
+      const setIdx = ex.sets.findIndex((x) => !x.done);
+      const base = Number(sheet.value ?? ex.sets[setIdx].weight) || 0;
+      sheet = { ...sheet, value: Math.max(0, base + Number(v)) };
+      render();
+      break;
+    }
+    case 'weight-set':
+      sheet = { ...sheet, value: Number(v) };
+      render();
+      break;
+    case 'weight-apply': {
+      const ex = st.activeSession.exercises[activeEx];
+      const setIdx = ex.sets.findIndex((x) => !x.done);
+      const raw = Number(root.querySelector('#w-input')?.value ?? sheet.value);
+      if (!Number.isFinite(raw) || raw < 0) { closeSheet(); break; }
+
+      // Apply to this set and every later un-logged set of the same exercise,
+      // so one correction fixes the whole exercise rather than one set.
+      await store.overrideWeight(activeEx, setIdx, raw);
+      for (let j = setIdx + 1; j < ex.sets.length; j++) {
+        if (!ex.sets[j].done) await store.overrideWeight(activeEx, j, raw);
+      }
+      closeSheet();
+      break;
+    }
+
     case 'add-set': await store.addSet(activeEx); render(); break;
     case 'swap-ex': openSheet({ kind: 'swap' }); break;
     case 'do-swap': await store.swapExercise(activeEx, v); coach = null; closeSheet(); break;
@@ -2499,7 +2611,7 @@ root.addEventListener('click', async (e) => {
     case 'share-invite':
       try {
         await navigator.share({
-          title: 'Progressive Overload',
+          title: 'Rep Public',
           text: 'Train with me — it tells you exactly what to lift and adjusts as you go.',
           url: v,
         });
@@ -2592,6 +2704,20 @@ root.addEventListener('input', (e) => {
   if (!el) return;
 
   if (el.dataset.act === 'search') { search = el.value; render(); }
+
+  if (el.dataset.act === 'weight-input') {
+    // Track the typed value so the plate cue and the confirm button follow it,
+    // without re-rendering on every keystroke (that would fight the caret).
+    sheet = { ...sheet, value: el.value };
+    const n = Number(el.value);
+    const ex = store.getState().activeSession?.exercises[activeEx];
+    if (ex && Number.isFinite(n) && n >= 0) {
+      const cue = root.querySelector('.sheet .loadcue');
+      if (cue) cue.innerHTML = hintHTML(store.hintFor(n, ex.loading));
+      const apply = root.querySelector('[data-act="weight-apply"]');
+      if (apply) apply.textContent = `Use ${fmtW(n)} lb`;
+    }
+  }
 
   if (el.dataset.act === 'friend-search') {
     const q = el.value;

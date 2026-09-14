@@ -1,4 +1,4 @@
-# Progressive Overload
+# Rep Public
 
 A workout tracker that prescribes your next set instead of just recording your last one.
 

@@ -1,4 +1,4 @@
--- Progressive Overload — schema v1
+-- Rep Public — schema v1
 --
 -- Design notes:
 --  * Workout state (plan, exerciseState, bodyweight log) is stored as one JSON

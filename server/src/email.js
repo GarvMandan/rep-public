@@ -22,7 +22,7 @@ export async function send(env, { to, subject, html, text }) {
 
   // Resend's shared sender works with no domain setup. Once a domain is
   // verified, set EMAIL_FROM and mail comes from your own address instead.
-  const from = env.EMAIL_FROM || 'Progressive Overload <onboarding@resend.dev>';
+  const from = env.EMAIL_FROM || 'Rep Public <onboarding@resend.dev>';
 
   try {
     const res = await fetch(RESEND_ENDPOINT, {
@@ -66,7 +66,7 @@ function shell(title, bodyHtml) {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:12px;overflow:hidden">
         <tr><td style="background:${INK};padding:20px 24px">
           <span style="color:#ffffff;font-size:17px;font-weight:700;letter-spacing:.04em">
-            PROGRESSIVE<span style="color:${BRAND}">·</span>OVERLOAD
+            REP<span style="color:${BRAND}">·</span>PUBLIC
           </span>
         </td></tr>
         <tr><td style="padding:28px 24px">
@@ -114,7 +114,7 @@ export function inviteEmail({ link, fromName, note }) {
     html: shell(
       `${escapeHtml(safeName)} invited you`,
       `<p style="margin:0 0 6px;color:#3c4450;font-size:15px;line-height:1.55">
-         They are tracking workouts on Progressive Overload and want you training alongside them.
+         They are tracking workouts on Rep Public and want you training alongside them.
          It tells you the exercise, the weight, the plates to load, the sets and the reps, then
          adjusts as you go.
        </p>
@@ -128,7 +128,7 @@ export function inviteEmail({ link, fromName, note }) {
          <span style="color:#5B6675;word-break:break-all">${link}</span>
        </p>`
     ),
-    text: `${safeName} invited you to train on Progressive Overload.\n`
+    text: `${safeName} invited you to train on Rep Public.\n`
       + (note ? `\n"${note}"\n` : '')
       + `\nAccept: ${link}\n`,
   };

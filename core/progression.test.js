@@ -3,7 +3,10 @@
 // No framework — plain assertions so this runs anywhere Node does.
 
 import assert from 'node:assert/strict';
-import { adjustNextSet, progressExercise, seedStartingWeight, roundToIncrement, estimate1RM } from './progression.js';
+import {
+  adjustNextSet, progressExercise, seedStartingWeight, roundToIncrement,
+  estimate1RM, updateStrength, weightForReps,
+} from './progression.js';
 import {
   planFromPreset, blankPlan, newCustomDay, buildWorkout, schedule,
   occurrenceIndex, migratePlan, listPresets, getDay, DAYS,
@@ -159,6 +162,118 @@ test('ignores sets that were never logged', () => {
   });
   assert.equal(r.verdict, 'increase');
   assert.equal(r.sets, 2);
+});
+
+// ═══ Learning: the adaptive layer ═════════════════════════════════════════
+test('the first session sets the baseline estimate outright', () => {
+  const r = updateStrength({
+    currentE1RM: 0,
+    sets: [{ weight: 185, actualReps: 5 }],
+  });
+  assert.equal(r.e1rm, estimate1RM(185, 5), 'no history means the observation IS the estimate');
+  assert.ok(r.confidence > 0);
+});
+
+test('a stronger performance raises the estimate', () => {
+  const before = 200;
+  const r = updateStrength({
+    currentE1RM: before,
+    sets: [{ weight: 225, actualReps: 5 }],   // implies ~262
+    confidence: 0.5,
+  });
+  assert.ok(r.e1rm > before, 'estimate moved up');
+  assert.ok(r.e1rm < 262, 'but not all the way in one session — one set is not proof');
+});
+
+test('a weaker performance lowers the estimate, more cautiously', () => {
+  const up = updateStrength({ currentE1RM: 200, sets: [{ weight: 225, actualReps: 5 }], confidence: 0.5 });
+  const down = updateStrength({ currentE1RM: 262, sets: [{ weight: 185, actualReps: 5 }], confidence: 0.5 });
+  const upMove = Math.abs(up.e1rm - 200) / Math.abs(estimate1RM(225, 5) - 200);
+  const downMove = Math.abs(down.e1rm - 262) / Math.abs(estimate1RM(185, 5) - 262);
+  assert.ok(downMove < upMove, 'a bad day should move the estimate less than a good one');
+});
+
+test('heavy sets are stronger evidence than light ones', () => {
+  const heavy = updateStrength({ currentE1RM: 200, sets: [{ weight: 240, actualReps: 3 }], confidence: 0.5 });
+  const light = updateStrength({ currentE1RM: 200, sets: [{ weight: 120, actualReps: 20 }], confidence: 0.5 });
+  const heavyClaim = estimate1RM(240, 3);
+  const lightClaim = estimate1RM(120, 20);
+  // Compare how far each moved toward its own claim.
+  const heavyFrac = (heavy.e1rm - 200) / (heavyClaim - 200);
+  const lightFrac = (light.e1rm - 200) / (lightClaim - 200);
+  assert.ok(heavyFrac > lightFrac, 'a heavy triple should shift belief more than a light set of 20');
+});
+
+test('sets with no reps teach nothing', () => {
+  const r = updateStrength({ currentE1RM: 200, sets: [{ weight: 225, actualReps: 0 }], confidence: 0.5 });
+  assert.equal(r.e1rm, 200, 'a failed set leaves the estimate alone');
+});
+
+test('the estimate survives an empty session', () => {
+  const r = updateStrength({ currentE1RM: 200, sets: [], confidence: 0.4 });
+  assert.equal(r.e1rm, 200);
+  assert.equal(r.confidence, 0.4);
+});
+
+test('a badly-too-light weight is corrected in one jump, not ten', () => {
+  // Someone doing 15 reps at a weight prescribed for 5 is far under-loaded.
+  const r = progressExercise({
+    exerciseId: 'bb-bench',
+    sets: [
+      { weight: 95, targetReps: 5, actualReps: 15 },
+      { weight: 95, targetReps: 5, actualReps: 14 },
+    ],
+    e1rm: 0, confidence: 0,
+  });
+  assert.equal(r.verdict, 'increase');
+  // Targets the top of the 5-8 range, so roughly 105-115 — a real correction
+  // rather than the single 5 lb increment plain double progression would give.
+  assert.ok(r.weight >= 105, `expected a real jump, got ${r.weight} from 95`);
+  assert.ok(r.weight && r.weight - 95 >= 10, 'jump should beat one increment');
+});
+
+test('a settled estimate is not moved by one wild session', () => {
+  // Confidence high: the engine should be sceptical of a sudden huge claim.
+  const r = progressExercise({
+    exerciseId: 'bb-bench',
+    sets: [{ weight: 185, targetReps: 8, actualReps: 20 }],
+    e1rm: 240, confidence: 1,
+  });
+  assert.ok(r.weight <= 185 * 1.06, `jump of ${r.weight - 185} lb is too large for a settled lifter`);
+});
+
+test('progression carries the learned estimate forward', () => {
+  const r = progressExercise({
+    exerciseId: 'bb-bench',
+    sets: [{ weight: 185, targetReps: 5, actualReps: 6 }],
+    e1rm: 210, confidence: 0.6,
+  });
+  assert.ok(typeof r.e1rm === 'number' && r.e1rm > 0, 'e1rm is returned for the next session');
+  assert.ok(r.confidence >= 0.6, 'confidence accumulates');
+});
+
+test('weightForReps and estimate1RM are consistent', () => {
+  for (const reps of [1, 3, 5, 8, 10, 12]) {
+    const w = weightForReps(300, reps);
+    assert.ok(Math.abs(estimate1RM(Math.round(w), reps) - 300) <= 3,
+      `round trip at ${reps} reps drifted too far`);
+  }
+});
+
+test('detraining is detected and the weight comes down', () => {
+  // Two sessions well short of the range.
+  let state = { e1rm: 250, confidence: 1, stallCount: 0 };
+  for (let i = 0; i < 2; i++) {
+    const r = progressExercise({
+      exerciseId: 'bb-bench',
+      sets: [{ weight: 205, targetReps: 5, actualReps: 2 }],
+      stallCount: state.stallCount, e1rm: state.e1rm, confidence: state.confidence,
+    });
+    state = { e1rm: r.e1rm, confidence: r.confidence, stallCount: r.stallCount, weight: r.weight, verdict: r.verdict };
+  }
+  assert.equal(state.verdict, 'deload');
+  assert.ok(state.weight < 205, 'weight reduced');
+  assert.ok(state.e1rm < 250, 'and the estimate came down too');
 });
 
 // ═══ seedStartingWeight ═══════════════════════════════════════════════════

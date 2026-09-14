@@ -204,29 +204,48 @@ export function createSync({ api, store }) {
         }
 
         // 2. State document.
+        //
+        // The rule that matters: **unsynced local edits always win.** If this
+        // device has changes the server has not seen — a custom workout, a
+        // reordered week — adopting remote would silently delete them. That
+        // was a real bug: every sync wiped custom workouts.
         const remoteDoc = remote.doc;
         const haveLocal = !!local.profile;
+        const hasLocalEdits = (local.revision || 0) > (local.syncedRevision || 0);
 
         if (!remoteDoc && haveLocal) {
           // First device to sync wins the empty slot.
           await api.putState(stateDoc(local), remote.version);
+          await store.markSynced();
         } else if (remoteDoc && !haveLocal) {
-          // Fresh device: adopt what the account already knows.
-          await store.replace({ ...remoteDoc, sessions: mergeSessions(remoteDoc.sessions, localSessions) });
+          // Fresh device with nothing of its own: adopt the account's state.
+          await store.replace(
+            { ...remoteDoc, sessions: mergeSessions(remoteDoc.sessions, localSessions) },
+            { fromRemote: true }
+          );
+          await store.markSynced();
         } else if (remoteDoc && haveLocal) {
-          if (preferLocal) {
-            await api.putState(stateDoc(local), remote.version);
+          if (preferLocal || hasLocalEdits) {
+            // This device has the newer plan. Push it, keeping every session
+            // from both sides so nothing logged elsewhere is lost.
+            const merged = {
+              ...local,
+              sessions: mergeSessions(remoteDoc.sessions, localSessions),
+            };
+            await store.replace(merged, { fromRemote: true });
+            await api.putState(stateDoc(store.getState()), remote.version);
+            await store.markSynced();
           } else {
-            // Remote is newer or equal: take its plan and progression, but keep
-            // every session either side has.
+            // No local edits pending, so the server is the better source for
+            // the plan and progression. Sessions still merge both ways.
             const merged = {
               ...remoteDoc,
               sessions: mergeSessions(remoteDoc.sessions, localSessions),
               activeSession: local.activeSession || remoteDoc.activeSession || null,
             };
-            await store.replace(merged);
-            // Push back the union so the server has the merged session list too.
+            await store.replace(merged, { fromRemote: true });
             await api.putState(stateDoc(store.getState()), remote.version);
+            await store.markSynced();
           }
         }
 

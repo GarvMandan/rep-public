@@ -1,4 +1,4 @@
-// Progressive Overload API — Cloudflare Worker + D1.
+// Rep Public API — Cloudflare Worker + D1.
 //
 // The client is the source of truth for *what you did*; the server is the source
 // of truth for *what that means*. Volume, PRs and 1RM are recomputed here from

@@ -56,6 +56,13 @@ export function emptyState() {
     sessions: [],        // completed sessions, newest last
     activeSession: null, // in-progress session, survives a page reload
     bodyweightLog: [],   // [{ date, weight }]
+
+    // Sync bookkeeping. revision > syncedRevision means this device has edits
+    // the server has not seen, and they must not be overwritten.
+    revision: 0,
+    syncedRevision: 0,
+    localChangedAt: 0,
+    lastSyncedAt: 0,
   };
 }
 
@@ -89,8 +96,23 @@ export function createStore(adapter = createLocalStorageAdapter()) {
     try { await adapter.set(STORAGE_KEY, state); } catch { /* storage unavailable; stay in memory */ }
   }
 
-  async function commit(next) {
-    state = next;
+  /**
+   * @param {object} next
+   * @param {object} [opts]
+   * @param {boolean} [opts.fromRemote] true when applying state pulled from the
+   *        server, so it is not re-flagged as a local edit needing upload.
+   */
+  async function commit(next, { fromRemote = false } = {}) {
+    // `revision` is what lets sync tell which side is actually newer. Without
+    // it a sync assumed remote always won and silently discarded whatever you
+    // had just edited on this device.
+    //
+    // A monotonic counter, not a timestamp: two edits inside the same
+    // millisecond are common (rename then save), and a clock-based check would
+    // miss the second one and lose the edit.
+    state = fromRemote
+      ? next
+      : { ...next, revision: (next.revision ?? state.revision ?? 0) + 1, localChangedAt: Date.now() };
     notify();
     await persist();
   }
@@ -109,8 +131,25 @@ export function createStore(adapter = createLocalStorageAdapter()) {
 
     async reset() { await commit(emptyState()); },
 
-    async replace(next) {
-      await commit(migrate(next));
+    /**
+     * Replace the whole state — used by import and by sync.
+     * @param {object} next
+     * @param {object} [opts]
+     * @param {boolean} [opts.fromRemote] pass true when the state came from the
+     *        server, so it is not immediately marked as a pending local edit.
+     */
+    async replace(next, { fromRemote = false } = {}) {
+      await commit(migrate(next), { fromRemote });
+    },
+
+    /** Record that local state is now safely on the server. */
+    async markSynced(at = Date.now()) {
+      // fromRemote: bumping the watermark is bookkeeping, not an edit, so it
+      // must not itself bump the revision it is recording.
+      await commit(
+        { ...state, syncedRevision: state.revision ?? 0, lastSyncedAt: at },
+        { fromRemote: true }
+      );
     },
 
     // ── Onboarding ────────────────────────────────────────────────────────
@@ -483,14 +522,23 @@ export function createStore(adapter = createLocalStorageAdapter()) {
         }));
 
         const next = progressExercise({
-          exerciseId: ex.exerciseId, sets, stallCount: prior.stallCount || 0,
+          exerciseId: ex.exerciseId,
+          sets,
+          stallCount: prior.stallCount || 0,
+          // Carry the learned strength estimate forward — this is what lets
+          // the engine converge on real strength instead of creeping.
+          e1rm: prior.e1rm || 0,
+          confidence: prior.confidence || 0,
         });
 
+        // best1RM is the all-time high water mark, shown as a PR. It is not the
+        // same as e1rm, which is the app's current working belief and can fall.
         const best = Math.max(prior.best1RM || 0, ...sets.map((s) => estimate1RM(s.weight, s.actualReps)));
 
         exerciseState[ex.exerciseId] = {
           weight: next.weight, targetReps: next.targetReps, sets: next.sets,
           stallCount: next.stallCount, verdict: next.verdict, reason: next.reason,
+          e1rm: next.e1rm, confidence: next.confidence,
           lastPerformed: finished.date, best1RM: best,
         };
       }

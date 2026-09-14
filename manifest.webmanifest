@@ -1,6 +1,6 @@
 {
-  "name": "Progressive Overload",
-  "short_name": "Overload",
+  "name": "Rep Public",
+  "short_name": "Rep Public",
   "description": "Workout tracker that prescribes your next set, not just records your last one.",
   "start_url": "./app.html",
   "scope": "./",
