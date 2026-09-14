@@ -91,9 +91,10 @@ All authenticated routes take `Authorization: Bearer <token>`.
 | POST | `/invites/accept` | accept an invite and become friends |
 | GET | `/invites` | invites you have sent |
 
-Social routes (`/users/search`, `/friends`, kudos) and creating invites require
-a verified email. The feed does not — an unverified user still sees their own
-workouts, which is how the app shows what verifying unlocks.
+Social routes (`/users/search`, `/friends`, kudos) and creating invites can
+require a verified email, controlled by `REQUIRE_EMAIL_VERIFICATION`. It is
+currently **off** — see [Email delivery](#email-delivery) for why. The feed is
+never gated: an unverified user still sees their own workouts.
 
 ## Security decisions worth knowing
 
