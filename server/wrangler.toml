@@ -24,5 +24,11 @@ GOOGLE_CLIENT_ID = ""
 # change this to an address on it.
 EMAIL_FROM = "Progressive Overload <onboarding@resend.dev>"
 
+# Resend will not deliver to anyone but the account owner until a sending domain
+# is verified, which requires owning a domain. Until then this stays "false" so
+# friends and invites work for everyone without an email ever being needed.
+# Set it to "true" once a domain is verified — no code change required.
+REQUIRE_EMAIL_VERIFICATION = "false"
+
 # RESEND_API_KEY is a secret, set with:
 #   npx wrangler secret put RESEND_API_KEY

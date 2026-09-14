@@ -1145,6 +1145,18 @@ function renderSettings(st) {
 
 // ═══ Account ══════════════════════════════════════════════════════════════
 
+/**
+ * Can this account use friends, invites and kudos?
+ *
+ * Open unless the server actually enforces verification — which it does not
+ * while the email provider can only reach the account owner.
+ */
+function socialUnlocked() {
+  if (!account) return false;
+  if (!api.verificationRequired()) return true;
+  return !!account.emailVerified;
+}
+
 const initials = (name) => String(name || '?').trim().slice(0, 2).toUpperCase();
 
 function avatarHTML(user, cls = '') {
@@ -1279,7 +1291,7 @@ function sheetAccount(st) {
         </div>
       </div>
 
-      ${!account.emailVerified ? `
+      ${!socialUnlocked() ? `
         <div class="card" style="background:rgba(245,158,11,.09);border-left:3px solid var(--hold)">
           <div style="font-weight:600;margin-bottom:4px">Verify your email</div>
           <p class="sm muted" style="margin:0 0 11px">
@@ -1327,7 +1339,7 @@ function sheetInvite() {
   return `
     ${sheetHead('Invite a friend', 'They become your friend the moment they join')}
     <div class="stack">
-      ${!account.emailVerified ? `
+      ${!socialUnlocked() ? `
         <div class="errbox">Verify your email first — check your inbox for the link.</div>
       ` : `
         ${created ? `
@@ -1461,7 +1473,7 @@ function sheetFriends() {
 
 /** Shown until the email is confirmed — this is what verification unlocks. */
 function verifyBanner() {
-  if (!account || account.emailVerified) return '';
+  if (socialUnlocked()) return '';
   return `
     <div class="card" style="background:rgba(245,158,11,.09);border-left:3px solid var(--hold)">
       <div style="font-weight:600;margin-bottom:3px">One step left</div>
@@ -1499,7 +1511,7 @@ function renderFeed() {
           <h2>Nothing here yet</h2>
           <p class="sm">Finish a workout, or invite a friend and watch theirs land here.</p>
         </div>
-        ${account.emailVerified ? `
+        ${socialUnlocked() ? `
           <button class="btn btn-primary btn-block" data-act="open-invite">Invite a friend</button>
           <button class="btn btn-ghost btn-block" data-act="open-friends">Find someone by username</button>
         ` : ''}
@@ -1511,7 +1523,7 @@ function renderFeed() {
       ${verifyBanner()}
       <div class="spread">
         <h1>Feed</h1>
-        ${account.emailVerified ? `
+        ${socialUnlocked() ? `
           <div class="row" style="gap:7px">
             <button class="btn btn-ghost btn-sm" data-act="open-invite">Invite</button>
             <button class="btn btn-ghost btn-sm" data-act="open-friends">Friends</button>

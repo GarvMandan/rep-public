@@ -133,8 +133,23 @@ async function sendVerification(env, user) {
   return send(env, { to: user.email, ...verificationEmail(link) });
 }
 
-/** Social features require a proven email address. */
-function requireVerified(user, ctx) {
+/**
+ * Social features require a proven email address — when enforcement is on.
+ *
+ * Resend only delivers to the account owner until a sending domain is verified,
+ * which needs a paid domain. Until then REQUIRE_EMAIL_VERIFICATION is "false"
+ * and this is a no-op: everyone can use friends and invites immediately.
+ *
+ * The verification machinery still runs — links are issued, clicking one still
+ * marks the account verified — so flipping the flag back to "true" after a
+ * domain is set up needs no code change.
+ */
+function verificationRequired(env) {
+  return String(env.REQUIRE_EMAIL_VERIFICATION ?? 'true') === 'true';
+}
+
+function requireVerified(user, env, ctx) {
+  if (!verificationRequired(env)) return null;
   if (user.email_verified) return null;
   return fail(
     'Verify your email to use friends and the feed. Check your inbox, or resend from your account.',
@@ -237,7 +252,11 @@ async function handleRegister(request, env, ctx) {
   // app either way and can resend from their account.
   const mail = await sendVerification(env, user);
 
-  return json({ token, user: publicUser(user), verificationSent: mail.sent }, ctx);
+  return json({
+    token, user: publicUser(user),
+    verificationSent: mail.sent,
+    verificationRequired: verificationRequired(env),
+  }, ctx);
 }
 
 async function handleLogin(request, env, ctx) {
@@ -258,7 +277,7 @@ async function handleLogin(request, env, ctx) {
   if (!ok) return wrong();
 
   const token = await createSession(env, user.id, request.headers.get('user-agent'));
-  return json({ token, user: publicUser(user) }, ctx);
+  return json({ token, user: publicUser(user), verificationRequired: verificationRequired(env) }, ctx);
 }
 
 async function handleGoogle(request, env, ctx) {
@@ -316,7 +335,7 @@ async function handleGoogle(request, env, ctx) {
   }
 
   const token = await createSession(env, user.id, request.headers.get('user-agent'));
-  return json({ token, user: publicUser(user) }, ctx);
+  return json({ token, user: publicUser(user), verificationRequired: verificationRequired(env) }, ctx);
 }
 
 // ── Email verification ────────────────────────────────────────────────────
@@ -420,7 +439,7 @@ async function handleResetPassword(request, env, ctx) {
 // ── Invites ───────────────────────────────────────────────────────────────
 
 async function createInvite(request, user, env, ctx) {
-  const blocked = requireVerified(user, ctx);
+  const blocked = requireVerified(user, env, ctx);
   if (blocked) return blocked;
 
   const { email, note } = await readBody(request);
@@ -895,7 +914,15 @@ export default {
       const user = await currentUser(request, env);
       if (!user) return fail('Sign in to continue.', 401, ctx);
 
-      if (path === '/me') return json({ user: publicUser(user) }, ctx);
+      // `verificationRequired` tells the client whether to nag about verifying.
+      // Without it the app would show a banner for a rule the server is not
+      // enforcing.
+      if (path === '/me') {
+        return json({
+          user: publicUser(user),
+          verificationRequired: verificationRequired(env),
+        }, ctx);
+      }
 
       if (path === '/state' && request.method === 'GET') return getState(user, env, ctx);
       if (path === '/state' && request.method === 'PUT') return putState(request, user, env, ctx);
@@ -917,7 +944,7 @@ export default {
       // workouts there, which is how the app explains what verifying unlocks.
       const SOCIAL = /^\/(users\/search|friends)/;
       if (SOCIAL.test(path) || /^\/sessions\/[^/]+\/kudos$/.test(path)) {
-        const blocked = requireVerified(user, ctx);
+        const blocked = requireVerified(user, env, ctx);
         if (blocked) return blocked;
       }
 

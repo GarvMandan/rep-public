@@ -10,6 +10,20 @@
 export function createApi({ baseUrl, tokenStore }) {
   let token = null;
 
+  // Whether the server actually enforces email verification. It is off while
+  // the email provider can only reach the account owner, so the app must not
+  // nag about a rule nobody is enforcing. Assume off until the server says
+  // otherwise — a spurious banner is worse than a missing one.
+  let verificationRequired = false;
+
+  /** Remember the flag whenever a response carries it. */
+  function noteFlags(r) {
+    if (r && typeof r.verificationRequired === 'boolean') {
+      verificationRequired = r.verificationRequired;
+    }
+    return r;
+  }
+
   async function loadToken() {
     if (token === null) token = (await tokenStore.get()) || '';
     return token;
@@ -62,25 +76,25 @@ export function createApi({ baseUrl, tokenStore }) {
 
     // ── Auth ──────────────────────────────────────────────────────────────
     async register({ email, password, username }) {
-      const r = await request('/auth/register', {
+      const r = noteFlags(await request('/auth/register', {
         method: 'POST', auth: false, body: { email, password, username },
-      });
+      }));
       await setToken(r.token);
       return r.user;
     },
 
     async login({ email, password }) {
-      const r = await request('/auth/login', {
+      const r = noteFlags(await request('/auth/login', {
         method: 'POST', auth: false, body: { email, password },
-      });
+      }));
       await setToken(r.token);
       return r.user;
     },
 
     async loginWithGoogle(idToken) {
-      const r = await request('/auth/google', {
+      const r = noteFlags(await request('/auth/google', {
         method: 'POST', auth: false, body: { idToken },
-      });
+      }));
       await setToken(r.token);
       return r.user;
     },
@@ -92,9 +106,12 @@ export function createApi({ baseUrl, tokenStore }) {
     },
 
     async me() {
-      const r = await request('/me');
+      const r = noteFlags(await request('/me'));
       return r.user;
     },
+
+    /** Does the server require a verified email for social features? */
+    verificationRequired: () => verificationRequired,
 
     // ── Email verification & password reset ───────────────────────────────
     verifyEmail: (token) => request('/auth/verify', { method: 'POST', auth: false, body: { token } }),

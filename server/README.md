@@ -149,10 +149,20 @@ including `+tag` variants of that same address, comes back:
 address. To send emails to other recipients, please verify a domain.
 ```
 
-So today, signing up with any other address creates a working account but no
-verification email arrives. The API reports this rather than failing silently:
-`/auth/resend-verification` returns a `reason` of `domain-not-verified` and a
-message the app shows to the user.
+Because of that, **email verification is currently switched off**:
+
+```toml
+# wrangler.toml
+REQUIRE_EMAIL_VERIFICATION = "false"
+```
+
+Anyone can sign up and immediately use friends, invites and the feed without an
+email ever being sent. Invite *links* work fine; only emailed invites are
+affected by the restriction.
+
+The machinery is still in place — verification links are issued, and clicking
+one still marks an account verified. Set the flag to "true" after verifying a
+domain and enforcement resumes with no code change.
 
 ### Lifting the restriction
 
