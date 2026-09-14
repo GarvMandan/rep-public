@@ -1,0 +1,17 @@
+{
+  "name": "progressive-overload-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create progressive-overload",
+    "db:migrate": "wrangler d1 execute progressive-overload --remote --file=./migrations/0001_init.sql",
+    "db:migrate:local": "wrangler d1 execute progressive-overload --local --file=./migrations/0001_init.sql",
+    "test": "node test/api.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}

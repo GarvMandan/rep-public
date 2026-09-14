@@ -1,0 +1,19 @@
+name = "progressive-overload-api"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# The API imports ../../core/*.js so the server validates sets with the exact
+# same progression math the app runs. One engine, no drift.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "progressive-overload"
+database_id = "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+
+[vars]
+# Comma-separated. The first entry is the fallback for non-browser callers.
+ALLOWED_ORIGINS = "https://garvmandan.github.io,http://localhost:5173"
+
+# GOOGLE_CLIENT_ID is public by design (it ships in the frontend), so it lives
+# here rather than in secrets.
+GOOGLE_CLIENT_ID = ""
