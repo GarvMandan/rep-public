@@ -1,0 +1,111 @@
+<!-- Landing page. On a phone this is what you open before installing; it
+     redirects straight into the app once installed to the home screen. -->
+<title>Progressive Overload</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#12151A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Overload">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700&display=swap">
+
+<style>
+  :root {
+    --ground: #12151A; --surface: #1A1F27; --surface-2: #222834; --line: #2C3441;
+    --ink: #E8ECF2; --muted: #8C97A8; --faint: #5B6675; --accent: #E4FF3A;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 40px 20px 60px; }
+  .mark { width: 64px; height: 64px; border-radius: 14px; display: block; }
+  h1 {
+    font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+    font-size: 44px; font-weight: 700; line-height: 1.05; margin: 20px 0 0;
+    letter-spacing: -0.01em; text-wrap: balance;
+  }
+  .lede { color: var(--muted); margin-top: 12px; font-size: 16px; }
+  .cta {
+    display: block; background: var(--accent); color: #0E1200; text-decoration: none;
+    text-align: center; font-weight: 700; font-size: 16px;
+    padding: 16px; border-radius: 10px; margin: 26px 0 30px;
+  }
+  h2 {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+    margin: 0 0 12px;
+  }
+  ol { margin: 0; padding-left: 20px; }
+  li { margin-bottom: 10px; color: var(--muted); }
+  li b { color: var(--ink); font-weight: 600; }
+  .card { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 14px; }
+  kbd {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-family: inherit; font-size: 13px; color: var(--ink);
+  }
+  .note { color: var(--faint); font-size: 13px; margin-top: 26px; text-align: center; }
+</style>
+
+<div class="wrap">
+  <img src="./icons/icon-192.png" alt="" class="mark">
+  <h1>Progressive Overload</h1>
+  <p class="lede">
+    Tells you the exercise, the weight, the plates to load, the sets and the reps —
+    then rewrites the next set the moment you log the last one.
+  </p>
+
+  <a class="cta" href="./app.html">Open the app</a>
+
+  <div class="card">
+    <h2>Put it on your home screen</h2>
+    <ol id="ios">
+      <li>Tap the <b>Share</b> button in Safari — the square with an arrow pointing up.</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+      <li>Tap <b>Add</b>. It appears as an app icon.</li>
+    </ol>
+    <p class="lede" style="font-size:14px;margin-top:14px">
+      Opens fullscreen with no browser bar, and works with no signal once installed.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Note</h2>
+    <p style="margin:0;color:var(--muted);font-size:14px">
+      Your training data is stored on this device only. There is no account yet, so it does
+      not sync between phone and computer. Use <b>Export</b> in the Plan tab for a backup.
+    </p>
+  </div>
+
+  <p class="note">Must be opened in <b>Safari</b> on iPhone to install.</p>
+</div>
+
+<script>
+  // Once installed, launching the icon should land in the app, not this page.
+  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+    location.replace('./app.html');
+  }
+
+  // Android/Chrome surface a real install prompt; use it when offered.
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    const cta = document.querySelector('.cta');
+    const ol = document.getElementById('ios');
+    ol.innerHTML = '<li>Tap the button below and confirm <b>Install</b>.</li>';
+    const btn = document.createElement('button');
+    btn.className = 'cta';
+    btn.style.width = '100%';
+    btn.style.border = 'none';
+    btn.style.font = 'inherit';
+    btn.style.fontWeight = '700';
+    btn.textContent = 'Install app';
+    btn.onclick = () => { e.prompt(); };
+    cta.after(btn);
+  });
+</script>

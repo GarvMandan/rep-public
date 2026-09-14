@@ -28,7 +28,8 @@ const TYPES = {
 createServer(async (req, res) => {
   try {
     let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    if (path === '/') path = '/app.html';
+    // Match GitHub Pages: a directory serves its index.html.
+    if (path.endsWith('/')) path += 'index.html';
 
     // Keep requests inside the project directory.
     const full = join(ROOT, normalize(path).replace(/^(\.\.[/\\])+/, ''));
