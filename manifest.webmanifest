@@ -1,0 +1,17 @@
+{
+  "name": "Progressive Overload",
+  "short_name": "Overload",
+  "description": "Workout tracker that prescribes your next set, not just records your last one.",
+  "start_url": "./app.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#12151A",
+  "theme_color": "#12151A",
+  "categories": ["health", "fitness"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

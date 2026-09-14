@@ -1,0 +1,14 @@
+{
+  "name": "progressive-overload",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Workout tracker with double-progression autoregulation.",
+  "scripts": {
+    "start": "node serve.js",
+    "test": "node core/progression.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
