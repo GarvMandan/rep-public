@@ -81,13 +81,27 @@ All authenticated routes take `Authorization: Bearer <token>`.
 | POST | `/friends/:id/accept` | accept a request |
 | DELETE | `/friends/:id` | unfriend |
 | GET | `/feed` | your workouts + friends', newest first |
-| POST | `/sessions/:id/kudos` | toggle kudos |
+| POST |  | toggle kudos |
+| POST |  | confirm an email from a link token |
+| POST |  | send a fresh verification email |
+| POST |  | request a password reset link |
+| POST |  | set a new password from a link token |
+| GET |  | who sent an invite (no auth needed) |
+| POST |  | create an invite, optionally emailed |
+| POST |  | accept an invite and become friends |
+| GET |  | invites you have sent |
+
+Social routes (, , kudos) and creating invites
+require a verified email. The feed does not — an unverified user still sees
+their own workouts, which is how the app shows what verifying unlocks.
 
 ## Security decisions worth knowing
 
-**Passwords** use PBKDF2-SHA256 at 210,000 iterations (OWASP 2023 guidance) with
-a unique 16-byte salt per user. Workers has no bcrypt or argon2 — only WebCrypto
-— so PBKDF2 is the correct available choice. Comparisons are constant-time.
+**Passwords** use PBKDF2-SHA256 at 100,000 iterations with a unique 16-byte salt
+per user. Workers has no bcrypt or argon2 — only WebCrypto — and hard-caps
+PBKDF2 at 100k, so this is the strongest the platform allows. The count is
+stored per user, so it can be raised later without invalidating existing
+passwords. Comparisons are constant-time.
 
 **Session tokens** are 256 bits of CSPRNG randomness. Only their SHA-256 is
 stored, so a database leak does not hand out live sessions.
@@ -110,8 +124,6 @@ allowlist. It never reflects an arbitrary origin.
 
 - **Rate limiting.** Cloudflare's dashboard rules are the right tool; add one on
   `/auth/*` before this is public, or login is brute-forceable.
-- **Password reset.** Needs an email provider. Until then a forgotten password
-  means a new account.
 - **Leaderboards.** The `personal_records` table and its index exist and are
   populated; the endpoint does not. That was your "friends and feed first" call.
 
