@@ -130,6 +130,26 @@ export async function verifyGoogleToken(idToken, clientId) {
   };
 }
 
+// ── Single-use link tokens ────────────────────────────────────────────────
+
+/**
+ * A token for an emailed link. The raw value goes in the URL; only its hash is
+ * stored, so the database cannot be used to verify or reset anyone's account.
+ */
+export function newLinkToken() {
+  return toHex(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+/**
+ * A short, human-shareable invite code. Uses an unambiguous alphabet — no O/0
+ * or I/1 — because these get read aloud and typed by hand.
+ */
+export function newInviteCode(length = 8) {
+  const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return [...bytes].map((b) => ALPHABET[b % ALPHABET.length]).join('');
+}
+
 /** Turn an email or display name into a username candidate. */
 export function suggestUsername(seed) {
   const base = String(seed || 'lifter')

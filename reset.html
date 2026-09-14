@@ -1,0 +1,115 @@
+<title>Reset your password</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12151A">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground: #12151A; --surface: #1A1F27; --surface-2: #222834; --line: #2C3441;
+    --ink: #E8ECF2; --muted: #8C97A8; --faint: #5B6675; --accent: #E4FF3A; --down: #EF4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--ground); color: var(--ink);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: grid; place-items: center; padding: 24px; line-height: 1.5;
+  }
+  .card { background: var(--surface); border-radius: 14px; padding: 28px 24px; max-width: 400px; width: 100%; }
+  h1 {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 30px; font-weight: 700;
+    margin: 0 0 8px; letter-spacing: -.01em;
+  }
+  p { color: var(--muted); margin: 0 0 20px; font-size: 14.5px; }
+  label {
+    display: block; font-size: 12px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+  }
+  input {
+    width: 100%; padding: 13px; border-radius: 8px; font: inherit; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line); margin-bottom: 16px;
+  }
+  input:focus { border-color: var(--accent); outline: none; }
+  .btn {
+    display: block; width: 100%; padding: 14px; border-radius: 9px; border: none;
+    background: var(--accent); color: #0E1200; font-weight: 700; font-size: 15px;
+    font-family: inherit; cursor: pointer; text-align: center; text-decoration: none;
+  }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .err {
+    padding: 11px 13px; border-radius: 8px; font-size: 13.5px; margin-bottom: 16px;
+    background: rgba(239,68,68,.1); border-left: 3px solid var(--down);
+  }
+  .ok { color: var(--accent); font-size: 40px; line-height: 1; margin-bottom: 14px; text-align: center; }
+</style>
+
+<div class="card" id="card"></div>
+
+<script type="module">
+import { createApi } from './core/api.js';
+import { API_BASE } from './core/config.js';
+
+const card = document.getElementById('card');
+const api = createApi({
+  baseUrl: API_BASE,
+  tokenStore: {
+    async get() { try { return localStorage.getItem('liftlog.token') || ''; } catch { return ''; } },
+    async set(v) { try { localStorage.setItem('liftlog.token', v); } catch {} },
+  },
+});
+
+const token = new URLSearchParams(location.search).get('token');
+let error = null;
+let busy = false;
+
+function render() {
+  if (!token) {
+    card.innerHTML = `
+      <h1>Link incomplete</h1>
+      <p>That reset link is missing its code. Request a new one from the sign-in screen.</p>
+      <a class="btn" href="./app.html">Open the app</a>`;
+    return;
+  }
+
+  card.innerHTML = `
+    <h1>Choose a new password</h1>
+    <p>This signs you out everywhere else, which is what you want if someone knew the old one.</p>
+    ${error ? `<div class="err">${error}</div>` : ''}
+    <label for="pw">New password</label>
+    <input id="pw" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+    <label for="pw2">Confirm password</label>
+    <input id="pw2" type="password" autocomplete="new-password">
+    <button class="btn" id="go" ${busy ? 'disabled' : ''}>${busy ? 'Saving…' : 'Set new password'}</button>`;
+
+  document.getElementById('go').onclick = submit;
+  for (const el of card.querySelectorAll('input')) {
+    el.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  }
+}
+
+async function submit() {
+  const pw = document.getElementById('pw').value;
+  const pw2 = document.getElementById('pw2').value;
+
+  if (pw.length < 8) { error = 'Passwords need at least 8 characters.'; return render(); }
+  if (pw !== pw2) { error = 'Those two passwords do not match.'; return render(); }
+
+  error = null; busy = true; render();
+  try {
+    await api.resetPassword(token, pw);
+    card.innerHTML = `
+      <div class="ok">✓</div>
+      <h1 style="text-align:center">Password changed</h1>
+      <p style="text-align:center">You are signed in on this device.</p>
+      <a class="btn" href="./app.html">Start training</a>`;
+  } catch (err) {
+    error = err.offline ? 'You appear to be offline. Try again once you reconnect.' : err.message;
+    busy = false; render();
+  }
+}
+
+render();
+</script>

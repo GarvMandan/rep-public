@@ -8,8 +8,9 @@
 import {
   hashPassword, verifyPassword, newSessionToken, hashToken, newId,
   validateEmail, validateUsername, validatePassword,
-  verifyGoogleToken, suggestUsername,
+  verifyGoogleToken, suggestUsername, newLinkToken, newInviteCode,
 } from './auth.js';
+import { send, verificationEmail, inviteEmail, passwordResetEmail } from './email.js';
 import { estimate1RM } from '../../core/progression.js';
 import { getExercise } from '../../core/exercises.js';
 
@@ -94,7 +95,51 @@ function publicUser(u) {
     displayName: u.display_name || u.username,
     avatarUrl: u.avatar_url || null,
     email: u.email || null,
+    emailVerified: !!u.email_verified,
   };
+}
+
+/** Where the app lives, for links inside emails. */
+function appUrl(env) {
+  return (env.APP_URL || 'https://garvmandan.github.io/rep-public').replace(/\/+$/, '');
+}
+
+const VERIFY_TTL = 24 * 3600_000;  // a day — long enough to survive a spam folder
+const RESET_TTL = 3600_000;        // an hour — short, because it grants account access
+const INVITE_TTL = 30 * 86400_000;
+
+/**
+ * Issue a single-use emailed link. Any earlier unused token for the same
+ * purpose is dropped, so only the newest link in someone's inbox works.
+ */
+async function issueLinkToken(env, userId, email, purpose, ttl) {
+  const raw = newLinkToken();
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM email_tokens WHERE user_id = ? AND purpose = ? AND used_at IS NULL')
+      .bind(userId, purpose),
+    env.DB.prepare(
+      `INSERT INTO email_tokens (token_hash, user_id, purpose, email, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(await hashToken(raw), userId, purpose, email, t, t + ttl),
+  ]);
+  return raw;
+}
+
+async function sendVerification(env, user) {
+  if (!user.email) return { sent: false, skipped: 'no-email' };
+  const raw = await issueLinkToken(env, user.id, user.email, 'verify', VERIFY_TTL);
+  const link = `${appUrl(env)}/verify.html?token=${raw}`;
+  return send(env, { to: user.email, ...verificationEmail(link) });
+}
+
+/** Social features require a proven email address. */
+function requireVerified(user, ctx) {
+  if (user.email_verified) return null;
+  return fail(
+    'Verify your email to use friends and the feed. Check your inbox, or resend from your account.',
+    403, ctx
+  );
 }
 
 // ── Server-side session validation ────────────────────────────────────────
@@ -187,7 +232,12 @@ async function handleRegister(request, env, ctx) {
 
   const token = await createSession(env, id, request.headers.get('user-agent'));
   const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first();
-  return json({ token, user: publicUser(user) }, ctx);
+
+  // Best-effort: a failed send must not fail the signup. The user lands in the
+  // app either way and can resend from their account.
+  const mail = await sendVerification(env, user);
+
+  return json({ token, user: publicUser(user), verificationSent: mail.sent }, ctx);
 }
 
 async function handleLogin(request, env, ctx) {
@@ -226,9 +276,14 @@ async function handleGoogle(request, env, ctx) {
     const byEmail = await env.DB.prepare('SELECT * FROM users WHERE email_lower = ?')
       .bind(claims.email.toLowerCase()).first();
     if (byEmail) {
-      await env.DB.prepare('UPDATE users SET google_sub = ?, updated_at = ? WHERE id = ?')
-        .bind(claims.sub, now(), byEmail.id).run();
-      user = byEmail;
+      // Linking also verifies: Google proved this address, which is exactly
+      // what the verification email would have established.
+      const t = now();
+      await env.DB.prepare(
+        `UPDATE users SET google_sub = ?, email_verified = 1,
+                verified_at = COALESCE(verified_at, ?), updated_at = ? WHERE id = ?`
+      ).bind(claims.sub, t, t, byEmail.id).run();
+      user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(byEmail.id).first();
     }
   }
 
@@ -240,14 +295,16 @@ async function handleGoogle(request, env, ctx) {
     for (let attempt = 0; attempt < 5 && !created; attempt++) {
       const candidate = suggestUsername(claims.email || claims.name);
       try {
+        // Pre-verified: verifyGoogleToken rejects unverified Google emails, so
+        // the address is already proven. Asking again would be theatre.
         await env.DB.prepare(
           `INSERT INTO users (id, email, email_lower, username, username_lower, display_name,
-                              avatar_url, google_sub, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                              avatar_url, google_sub, email_verified, verified_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
         ).bind(
           id, claims.email, claims.email ? claims.email.toLowerCase() : null,
           candidate, candidate.toLowerCase(), claims.name || candidate,
-          claims.picture, claims.sub, t, t
+          claims.picture, claims.sub, t, t, t
         ).run();
         created = true;
       } catch (e) {
@@ -260,6 +317,215 @@ async function handleGoogle(request, env, ctx) {
 
   const token = await createSession(env, user.id, request.headers.get('user-agent'));
   return json({ token, user: publicUser(user) }, ctx);
+}
+
+// ── Email verification ────────────────────────────────────────────────────
+
+async function handleVerify(request, env, ctx) {
+  const { token } = await readBody(request);
+  if (!token) return fail('That verification link is incomplete.', 400, ctx);
+
+  const row = await env.DB.prepare(
+    `SELECT * FROM email_tokens WHERE token_hash = ? AND purpose = 'verify'`
+  ).bind(await hashToken(token)).first();
+
+  if (!row) return fail('That verification link is not valid. Request a new one.', 400, ctx);
+  if (row.used_at) return json({ ok: true, already: true }, ctx);
+  if (row.expires_at < now()) {
+    return fail('That link has expired. Request a new one from your account.', 400, ctx);
+  }
+
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE users SET email_verified = 1, verified_at = ?, updated_at = ? WHERE id = ?')
+      .bind(t, t, row.user_id),
+    env.DB.prepare('UPDATE email_tokens SET used_at = ? WHERE token_hash = ?').bind(t, row.token_hash),
+  ]);
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.user_id).first();
+  return json({ ok: true, user: publicUser(user) }, ctx);
+}
+
+async function handleResendVerification(user, env, ctx) {
+  if (user.email_verified) return json({ ok: true, already: true }, ctx);
+  const r = await sendVerification(env, user);
+  return json({ ok: true, sent: r.sent, reason: r.skipped || r.error || null }, ctx);
+}
+
+// ── Password reset ────────────────────────────────────────────────────────
+
+async function handleForgotPassword(request, env, ctx) {
+  const { email } = await readBody(request);
+  if (!email) return fail('Enter your email address.', 400, ctx);
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE email_lower = ?')
+    .bind(String(email).trim().toLowerCase()).first();
+
+  // Always the same answer: whether an address has an account is not public.
+  if (user?.email) {
+    const raw = await issueLinkToken(env, user.id, user.email, 'reset', RESET_TTL);
+    await send(env, {
+      to: user.email,
+      ...passwordResetEmail(`${appUrl(env)}/reset.html?token=${raw}`),
+    });
+  }
+
+  return json({ ok: true, message: 'If that address has an account, a reset link is on its way.' }, ctx);
+}
+
+async function handleResetPassword(request, env, ctx) {
+  const { token, password } = await readBody(request);
+  if (!token) return fail('That reset link is incomplete.', 400, ctx);
+
+  const bad = validatePassword(password);
+  if (bad) return fail(bad, 400, ctx);
+
+  const row = await env.DB.prepare(
+    `SELECT * FROM email_tokens WHERE token_hash = ? AND purpose = 'reset'`
+  ).bind(await hashToken(token)).first();
+
+  if (!row || row.used_at) return fail('That reset link is not valid. Request a new one.', 400, ctx);
+  if (row.expires_at < now()) return fail('That link has expired. Request a new one.', 400, ctx);
+
+  const { hash, salt, iterations } = await hashPassword(password);
+  const t = now();
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users SET password_hash = ?, password_salt = ?, password_iter = ?,
+              email_verified = 1, updated_at = ? WHERE id = ?`
+    ).bind(hash, salt, iterations, t, row.user_id),
+    env.DB.prepare('UPDATE email_tokens SET used_at = ? WHERE token_hash = ?').bind(t, row.token_hash),
+    // Resetting a password signs out every other device — the whole point when
+    // the reason for resetting is that someone else had the old one.
+    env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(row.user_id),
+  ]);
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.user_id).first();
+  const sessionToken = await createSession(env, user.id, request.headers.get('user-agent'));
+  return json({ ok: true, token: sessionToken, user: publicUser(user) }, ctx);
+}
+
+// ── Invites ───────────────────────────────────────────────────────────────
+
+async function createInvite(request, user, env, ctx) {
+  const blocked = requireVerified(user, ctx);
+  if (blocked) return blocked;
+
+  const { email, note } = await readBody(request);
+
+  if (email) {
+    const bad = validateEmail(email);
+    if (bad) return fail(bad, 400, ctx);
+  }
+  if (note && String(note).length > 300) return fail('That note is too long.', 400, ctx);
+
+  const code = newInviteCode();
+  const t = now();
+
+  await env.DB.prepare(
+    `INSERT INTO invites (code, inviter_id, email, note, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(code, user.id, email ? email.trim().toLowerCase() : null,
+         note ? String(note).slice(0, 300) : null, t, t + INVITE_TTL).run();
+
+  const link = `${appUrl(env)}/?invite=${code}`;
+  let emailed = false;
+
+  if (email) {
+    const r = await send(env, {
+      to: email.trim(),
+      ...inviteEmail({ link, fromName: user.display_name || user.username, note }),
+    });
+    emailed = r.sent;
+  }
+
+  return json({ ok: true, code, link, emailed }, ctx);
+}
+
+/**
+ * Look up an invite without consuming it, so the sign-up screen can say who
+ * invited you before you have an account.
+ */
+async function peekInvite(request, env, ctx) {
+  const code = (new URL(request.url).searchParams.get('code') || '').toUpperCase();
+  if (!code) return fail('No invite code.', 400, ctx);
+
+  const row = await env.DB.prepare(
+    `SELECT i.*, u.username, u.display_name, u.avatar_url
+       FROM invites i JOIN users u ON u.id = i.inviter_id
+      WHERE i.code = ?`
+  ).bind(code).first();
+
+  if (!row) return fail('That invite is not valid.', 404, ctx);
+  if (row.expires_at < now()) return fail('That invite has expired.', 410, ctx);
+
+  return json({
+    code: row.code,
+    note: row.note,
+    accepted: !!row.accepted_by,
+    from: {
+      username: row.username,
+      displayName: row.display_name || row.username,
+      avatarUrl: row.avatar_url,
+    },
+  }, ctx);
+}
+
+/** Accept an invite: become friends with whoever sent it. */
+async function acceptInvite(request, user, env, ctx) {
+  const { code } = await readBody(request);
+  if (!code) return fail('No invite code.', 400, ctx);
+
+  const row = await env.DB.prepare('SELECT * FROM invites WHERE code = ?')
+    .bind(String(code).toUpperCase()).first();
+
+  if (!row) return fail('That invite is not valid.', 404, ctx);
+  if (row.expires_at < now()) return fail('That invite has expired.', 410, ctx);
+  if (row.inviter_id === user.id) return fail('That is your own invite.', 400, ctx);
+
+  const t = now();
+  const statements = [];
+
+  // A link invite can be used repeatedly; mark the first acceptance only.
+  if (!row.accepted_by) {
+    statements.push(
+      env.DB.prepare('UPDATE invites SET accepted_by = ?, accepted_at = ? WHERE code = ?')
+        .bind(user.id, t, row.code)
+    );
+  }
+
+  // Accepting an invite is mutual consent, so friendship is immediate rather
+  // than another pending request.
+  for (const [a, b] of [[user.id, row.inviter_id], [row.inviter_id, user.id]]) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO friendships (user_id, friend_id, status, requested_by, created_at, updated_at)
+         VALUES (?, ?, 'accepted', ?, ?, ?)
+         ON CONFLICT(user_id, friend_id) DO UPDATE SET status = 'accepted', updated_at = excluded.updated_at`
+      ).bind(a, b, row.inviter_id, t, t)
+    );
+  }
+
+  await env.DB.batch(statements);
+
+  const inviter = await env.DB.prepare('SELECT username, display_name FROM users WHERE id = ?')
+    .bind(row.inviter_id).first();
+
+  return json({
+    ok: true,
+    friend: { username: inviter.username, displayName: inviter.display_name || inviter.username },
+  }, ctx);
+}
+
+async function listInvites(user, env, ctx) {
+  const { results } = await env.DB.prepare(
+    `SELECT i.code, i.email, i.note, i.created_at, i.expires_at, i.accepted_at,
+            u.username AS accepted_username
+       FROM invites i LEFT JOIN users u ON u.id = i.accepted_by
+      WHERE i.inviter_id = ? ORDER BY i.created_at DESC LIMIT 30`
+  ).bind(user.id).all();
+  return json({ invites: results }, ctx);
 }
 
 async function handleLogout(request, env, ctx) {
@@ -607,6 +873,12 @@ export default {
       if (path === '/auth/login' && request.method === 'POST') return handleLogin(request, env, ctx);
       if (path === '/auth/google' && request.method === 'POST') return handleGoogle(request, env, ctx);
       if (path === '/auth/logout' && request.method === 'POST') return handleLogout(request, env, ctx);
+      if (path === '/auth/verify' && request.method === 'POST') return handleVerify(request, env, ctx);
+      if (path === '/auth/forgot' && request.method === 'POST') return handleForgotPassword(request, env, ctx);
+      if (path === '/auth/reset' && request.method === 'POST') return handleResetPassword(request, env, ctx);
+      // Peeking at an invite must work before you have an account — the sign-up
+      // screen shows who invited you.
+      if (path === '/invites/peek') return peekInvite(request, env, ctx);
 
       // Everything below needs a valid session.
       const user = await currentUser(request, env);
@@ -619,6 +891,24 @@ export default {
 
       if (path === '/sessions' && request.method === 'POST') return uploadSessions(request, user, env, ctx);
       if (path === '/sessions' && request.method === 'GET') return listSessions(request, user, env, ctx);
+
+      if (path === '/auth/resend-verification' && request.method === 'POST') {
+        return handleResendVerification(user, env, ctx);
+      }
+
+      if (path === '/invites' && request.method === 'GET') return listInvites(user, env, ctx);
+      if (path === '/invites' && request.method === 'POST') return createInvite(request, user, env, ctx);
+      if (path === '/invites/accept' && request.method === 'POST') return acceptInvite(request, user, env, ctx);
+
+      // Anything touching *other people* needs a proven email address. Gating in
+      // one place means a new social route cannot quietly skip the check.
+      // The feed is deliberately excluded: unverified users still see their own
+      // workouts there, which is how the app explains what verifying unlocks.
+      const SOCIAL = /^\/(users\/search|friends)/;
+      if (SOCIAL.test(path) || /^\/sessions\/[^/]+\/kudos$/.test(path)) {
+        const blocked = requireVerified(user, ctx);
+        if (blocked) return blocked;
+      }
 
       if (path === '/users/search') return searchUsers(request, user, env, ctx);
       if (path === '/friends' && request.method === 'GET') return listFriends(user, env, ctx);

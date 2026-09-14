@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 import {
   hashPassword, verifyPassword, newSessionToken, hashToken, newId,
   validateEmail, validateUsername, validatePassword, suggestUsername,
+  newLinkToken, newInviteCode,
 } from '../src/auth.js';
+import { verificationEmail, inviteEmail, passwordResetEmail } from '../src/email.js';
 import { estimate1RM } from '../../core/progression.js';
 import { getExercise } from '../../core/exercises.js';
 
@@ -76,6 +78,79 @@ test('ids are unique and prefixed', () => {
   const ids = new Set(Array.from({ length: 500 }, () => newId('u')));
   assert.equal(ids.size, 500);
   assert.ok([...ids][0].startsWith('u_'));
+});
+
+// ═══ Link tokens and invite codes ═════════════════════════════════════════
+test('link tokens are unguessable and stored only as hashes', async () => {
+  const a = newLinkToken();
+  assert.equal(a.length, 64, '256 bits');
+  assert.notEqual(a, newLinkToken());
+  const h = await hashToken(a);
+  assert.notEqual(h, a, 'the database never holds the raw link token');
+});
+
+test('invite codes avoid characters people misread', () => {
+  const codes = Array.from({ length: 200 }, () => newInviteCode());
+  for (const c of codes) {
+    assert.equal(c.length, 8);
+    assert.ok(/^[A-HJ-NP-Z2-9]+$/.test(c), `"${c}" contains an ambiguous character`);
+    assert.ok(!/[O0I1L]/.test(c), `"${c}" could be misread`);
+  }
+  assert.ok(new Set(codes).size > 195, 'codes should not collide in practice');
+});
+
+// ═══ Email templates ══════════════════════════════════════════════════════
+test('every email ships both html and plain text', () => {
+  const msgs = [
+    verificationEmail('https://x.test/verify.html?token=abc'),
+    inviteEmail({ link: 'https://x.test/?invite=ABC', fromName: 'Garv', note: 'come lift' }),
+    passwordResetEmail('https://x.test/reset.html?token=abc'),
+  ];
+  for (const m of msgs) {
+    assert.ok(m.subject && m.html && m.text, 'missing a part');
+    assert.ok(m.html.includes('<!doctype html>'), 'html should be a full document');
+    assert.ok(!m.text.includes('<'), 'the text alternative should not contain markup');
+  }
+});
+
+test('emails carry their link in both html and text', () => {
+  const link = 'https://x.test/verify.html?token=tok123';
+  const m = verificationEmail(link);
+  assert.ok(m.html.includes(link), 'html has a clickable link');
+  assert.ok(m.text.includes(link), 'text has a pasteable link');
+});
+
+test('an invite note cannot inject markup into the email', () => {
+  const m = inviteEmail({
+    link: 'https://x.test/?invite=ABC',
+    fromName: '<script>alert(1)</script>',
+    note: '<img src=x onerror=alert(1)>',
+  });
+  // Only the HTML part needs escaping — the text alternative is never parsed
+  // as markup, so raw angle brackets there are inert.
+  assert.ok(!m.html.includes('<script>'), 'the sender name is escaped in html');
+  assert.ok(!m.html.includes('<img src=x'), 'the note is escaped in html');
+  assert.ok(m.html.includes('&lt;script&gt;'), 'and rendered as visible text instead');
+  assert.ok(m.html.includes('&lt;img'), 'the note too');
+});
+
+test('a display name cannot inject email headers', () => {
+  // CRLF in a Subject line is header injection: a crafted name could append
+  // `Bcc:` and turn invites into a spam relay.
+  const m = inviteEmail({
+    link: 'https://x.test/?invite=ABC',
+    fromName: 'Attacker\r\nBcc: victim@example.com',
+    note: null,
+  });
+  assert.ok(!/[\r\n]/.test(m.subject), 'the subject must be a single line');
+  assert.ok(!m.subject.includes('Bcc:') || !/[\r\n]/.test(m.subject));
+});
+
+test('a missing display name still produces a sensible subject', () => {
+  for (const name of [null, undefined, '', '   ']) {
+    const m = inviteEmail({ link: 'https://x.test/?invite=A', fromName: name, note: null });
+    assert.ok(m.subject.startsWith('Someone invited'), `got "${m.subject}"`);
+  }
 });
 
 // ═══ Validation ═══════════════════════════════════════════════════════════

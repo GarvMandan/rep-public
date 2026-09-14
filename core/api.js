@@ -96,6 +96,24 @@ export function createApi({ baseUrl, tokenStore }) {
       return r.user;
     },
 
+    // ── Email verification & password reset ───────────────────────────────
+    verifyEmail: (token) => request('/auth/verify', { method: 'POST', auth: false, body: { token } }),
+    resendVerification: () => request('/auth/resend-verification', { method: 'POST' }),
+    forgotPassword: (email) => request('/auth/forgot', { method: 'POST', auth: false, body: { email } }),
+
+    async resetPassword(token, password) {
+      const r = await request('/auth/reset', { method: 'POST', auth: false, body: { token, password } });
+      // A reset signs you straight in — the token it returns replaces any old one.
+      if (r.token) await setToken(r.token);
+      return r.user;
+    },
+
+    // ── Invites ───────────────────────────────────────────────────────────
+    createInvite: (email, note) => request('/invites', { method: 'POST', body: { email, note } }),
+    peekInvite: (code) => request(`/invites/peek?code=${encodeURIComponent(code)}`, { auth: false }),
+    acceptInvite: (code) => request('/invites/accept', { method: 'POST', body: { code } }),
+    listInvites: () => request('/invites'),
+
     // ── State ─────────────────────────────────────────────────────────────
     getState: () => request('/state'),
     putState: (doc, version) => request('/state', { method: 'PUT', body: { doc, version } }),

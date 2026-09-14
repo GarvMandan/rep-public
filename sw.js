@@ -8,12 +8,14 @@
 // Bump CACHE when shipping a change. The old cache is deleted on activate, and
 // clients are claimed immediately so the new version takes effect on next load.
 
-const CACHE = 'overload-v3';
+const CACHE = 'overload-v4';
 
 const ASSETS = [
   './',
   './index.html',
   './app.html',
+  './verify.html',
+  './reset.html',
   './manifest.webmanifest',
   './core/store.js',
   './core/exercises.js',

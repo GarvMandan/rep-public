@@ -586,6 +586,12 @@ let friendsCache = null;
 let authBusy = false;
 let authError = null;
 let authNotice = null;
+// Set once the account check has finished, so we never flash the sign-in screen
+// at someone who is already signed in.
+let authResolved = false;
+let authMode = 'signin';
+let pendingInvite = null;   // { code, from, note } when arriving via an invite link
+let invitesCache = null;
 
 let view = 'today';
 let setupStep = 0;
@@ -1166,13 +1172,44 @@ const GOOGLE_MARK = `<svg viewBox="0 0 48 48" aria-hidden="true">
   <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
 </svg>`;
 
-/** Sign in / create account. Shown as a sheet, never as a wall. */
-function sheetAuth() {
-  const mode = sheet.mode || 'signin';
-  const isUp = mode === 'signup';
+/**
+ * The sign-in screen. An account is required, so this is a full page rather
+ * than a sheet — but once signed in the session persists and the app works
+ * offline, so a dead-signal gym never locks you out.
+ */
+function renderAuthGate() {
+  const isUp = authMode === 'signup';
 
   return `
-    ${sheetHead(isUp ? 'Create an account' : 'Sign in', 'Sync across devices and train with friends')}
+    <div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>
+    <div class="stack" style="padding-top:8px">
+      ${pendingInvite ? `
+        <div class="card" style="background:rgba(228,255,58,.07);border:1px solid var(--accent)">
+          <div class="row" style="gap:11px">
+            ${avatarHTML(pendingInvite.from)}
+            <div style="flex:1">
+              <div style="font-weight:600">${esc(pendingInvite.from.displayName)} invited you</div>
+              <div class="sm muted">You'll be friends as soon as you sign in.</div>
+            </div>
+          </div>
+          ${pendingInvite.note ? `<div class="coach" style="margin-top:11px">${esc(pendingInvite.note)}</div>` : ''}
+        </div>` : `
+        <div style="padding:14px 0 4px">
+          <div class="eyebrow">Double progression · auto-regulated</div>
+          <h1 style="margin-top:8px;font-size:38px;line-height:1.06">Lift more than<br>you did last time.</h1>
+          <p class="muted sm" style="margin-top:10px;max-width:40ch">
+            Tells you the exercise, the weight, the plates to load, the sets and the reps —
+            then rewrites the next set the moment you log the last one.
+          </p>
+        </div>`}
+
+      ${renderAuthForm(isUp)}
+    </div>`;
+}
+
+/** The form itself, shared by the gate and the re-auth sheet. */
+function renderAuthForm(isUp) {
+  return `
     <div class="stack">
       <div class="authtabs">
         <button aria-selected="${!isUp}" data-act="auth-mode" data-v="signin">Sign in</button>
@@ -1215,10 +1252,14 @@ function sheetAuth() {
         ${authBusy ? 'Working…' : isUp ? 'Create account' : 'Sign in'}
       </button>
 
+      ${isUp ? '' : `
+        <button class="btn-sm muted btn-block" style="text-align:center;padding:4px"
+                data-act="forgot-password">Forgot your password?</button>`}
+
       <p class="sm muted" style="margin:0;text-align:center">
         ${isUp
-          ? 'Your training history on this device is kept and uploaded to the new account.'
-          : 'No account? Create one — this device’s history comes with you.'}
+          ? 'Any training history on this device is kept and uploaded to the new account.'
+          : 'Signing in works offline afterward — you only need a connection now.'}
       </p>
     </div>`;
 }
@@ -1238,6 +1279,18 @@ function sheetAccount(st) {
         </div>
       </div>
 
+      ${!account.emailVerified ? `
+        <div class="card" style="background:rgba(245,158,11,.09);border-left:3px solid var(--hold)">
+          <div style="font-weight:600;margin-bottom:4px">Verify your email</div>
+          <p class="sm muted" style="margin:0 0 11px">
+            Check your inbox for a link. Friends and the feed unlock once your address is confirmed.
+          </p>
+          <button class="btn btn-ghost btn-sm btn-block" data-act="resend-verify" ${authBusy ? 'disabled' : ''}>
+            ${authBusy ? 'Sending…' : 'Resend the email'}
+          </button>
+          ${authNotice ? `<div class="okbox" style="margin-top:9px">${esc(authNotice)}</div>` : ''}
+        </div>` : ''}
+
       <div class="card" style="background:var(--surface-2)">
         <div class="spread">
           <span class="eyebrow">Sync</span>
@@ -1248,18 +1301,93 @@ function sheetAccount(st) {
               : syncState.lastAt ? `Synced ${relTime(syncState.lastAt)}` : 'Not yet synced'}
           </span>
         </div>
+        <p class="sm muted" style="margin:6px 0 0">
+          Syncs automatically after every workout and whenever you open the app.
+        </p>
         ${syncState.lastError ? `<div class="sm muted" style="margin-top:6px">${esc(syncState.lastError)}</div>` : ''}
         <button class="btn btn-ghost btn-sm btn-block" style="margin-top:10px" data-act="sync-now"
                 ${syncState.syncing ? 'disabled' : ''}>
-          ${syncState.syncing ? 'Syncing…' : 'Sync now'}
+          ${syncState.syncing ? 'Syncing…' : 'Sync again now'}
         </button>
       </div>
 
       <button class="btn btn-ghost btn-block" data-act="open-friends">Friends</button>
+      <button class="btn btn-ghost btn-block" data-act="open-invite">Invite a friend</button>
       <button class="btn btn-ghost btn-block btn-danger" data-act="signout">Sign out</button>
       <p class="sm muted" style="margin:0">
         Signing out leaves your training data on this device. It stays in your account too.
       </p>
+    </div>`;
+}
+
+/** Invite by email, or by a link you can send however you like. */
+function sheetInvite() {
+  const created = sheet.created;
+
+  return `
+    ${sheetHead('Invite a friend', 'They become your friend the moment they join')}
+    <div class="stack">
+      ${!account.emailVerified ? `
+        <div class="errbox">Verify your email first — check your inbox for the link.</div>
+      ` : `
+        ${created ? `
+          <div class="okbox">
+            ${created.emailed
+              ? `Invite sent to ${esc(created.to)}.`
+              : 'Invite link ready — send it however you like.'}
+          </div>
+          <div class="field">
+            <label>Invite link</label>
+            <input readonly value="${esc(created.link)}" data-act="invite-link"
+                   onclick="this.select()" style="font-size:13px">
+          </div>
+          <div class="row" style="gap:9px">
+            <button class="btn btn-primary" style="flex:1" data-act="copy-invite" data-v="${esc(created.link)}">
+              Copy link
+            </button>
+            ${navigator.share ? `
+              <button class="btn btn-ghost" style="flex:1" data-act="share-invite" data-v="${esc(created.link)}">
+                Share
+              </button>` : ''}
+          </div>
+          <button class="btn btn-ghost btn-sm btn-block" data-act="new-invite">Make another</button>
+        ` : `
+          <div class="field">
+            <label for="inv-email">Their email (optional)</label>
+            <input id="inv-email" type="email" inputmode="email" autocapitalize="off"
+                   spellcheck="false" placeholder="Leave blank for a shareable link">
+          </div>
+          <div class="field">
+            <label for="inv-note">Add a note (optional)</label>
+            <input id="inv-note" placeholder="Come lift with me" maxlength="300">
+          </div>
+          <button class="btn btn-primary btn-block" data-act="send-invite" ${authBusy ? 'disabled' : ''}>
+            ${authBusy ? 'Creating…' : 'Create invite'}
+          </button>
+          <p class="sm muted" style="margin:0">
+            With an email we send it for you. Without one you get a link to send yourself.
+          </p>
+        `}
+
+        ${invitesCache?.invites?.length ? `
+          <div>
+            <div class="eyebrow" style="margin-bottom:7px">Sent</div>
+            <div class="stack" style="gap:6px">
+              ${invitesCache.invites.slice(0, 8).map((i) => `
+                <div class="personrow">
+                  <div class="who">
+                    <div class="nm">${esc(i.email || 'Shareable link')}</div>
+                    <div class="un">${i.accepted_at
+                      ? `Joined as @${esc(i.accepted_username || '')}`
+                      : `Code ${esc(i.code)}`}</div>
+                  </div>
+                  <span class="pill ${i.accepted_at ? 'pill-up' : 'pill-flat'}">
+                    ${i.accepted_at ? 'Joined' : 'Pending'}
+                  </span>
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
+      `}
     </div>`;
 }
 
@@ -1330,29 +1458,30 @@ function sheetFriends() {
 }
 
 // ═══ Feed ═════════════════════════════════════════════════════════════════
-function renderFeed() {
-  if (!account) {
-    return `
-      <div class="stack">
-        <div class="card" style="text-align:center;padding:30px var(--pad)">
-          <div class="eyebrow">Feed</div>
-          <h1 style="margin:8px 0 6px">Train with friends.</h1>
-          <p class="muted sm" style="margin:0 0 18px;max-width:34ch;margin-inline:auto">
-            Create an account to sync across devices, add friends, and see each other's workouts.
-          </p>
-          <button class="btn btn-primary" data-act="open-auth" data-v="signup">Create an account</button>
-          <button class="btn btn-ghost btn-sm btn-block" style="margin-top:9px" data-act="open-auth" data-v="signin">
-            I already have one
-          </button>
-        </div>
-        <p class="sm muted" style="text-align:center;margin:0">
-          The app works fully without an account — this only adds sync and friends.
-        </p>
-      </div>`;
-  }
 
+/** Shown until the email is confirmed — this is what verification unlocks. */
+function verifyBanner() {
+  if (!account || account.emailVerified) return '';
+  return `
+    <div class="card" style="background:rgba(245,158,11,.09);border-left:3px solid var(--hold)">
+      <div style="font-weight:600;margin-bottom:3px">One step left</div>
+      <p class="sm muted" style="margin:0 0 11px">
+        Confirm your email to add friends and share workouts. We sent a link to
+        <b style="color:var(--muted)">${esc(account.email || 'your address')}</b>.
+      </p>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1" data-act="resend-verify" ${authBusy ? 'disabled' : ''}>
+          ${authBusy ? 'Sending…' : 'Resend email'}
+        </button>
+        <button class="btn btn-ghost btn-sm" data-act="check-verify">I verified it</button>
+      </div>
+      ${authNotice ? `<div class="okbox" style="margin-top:9px">${esc(authNotice)}</div>` : ''}
+    </div>`;
+}
+
+function renderFeed() {
   if (!feedCache) {
-    return `<div class="empty"><h2>Loading…</h2></div>`;
+    return `<div class="stack">${verifyBanner()}<div class="empty"><h2>Loading…</h2></div></div>`;
   }
 
   if (feedCache.error) {
@@ -1365,19 +1494,28 @@ function renderFeed() {
   if (!feedCache.items.length) {
     return `
       <div class="stack">
+        ${verifyBanner()}
         <div class="empty">
           <h2>Nothing here yet</h2>
-          <p class="sm">Finish a workout, or add a friend and watch theirs land here.</p>
+          <p class="sm">Finish a workout, or invite a friend and watch theirs land here.</p>
         </div>
-        <button class="btn btn-primary btn-block" data-act="open-friends">Find friends</button>
+        ${account.emailVerified ? `
+          <button class="btn btn-primary btn-block" data-act="open-invite">Invite a friend</button>
+          <button class="btn btn-ghost btn-block" data-act="open-friends">Find someone by username</button>
+        ` : ''}
       </div>`;
   }
 
   return `
     <div class="stack">
+      ${verifyBanner()}
       <div class="spread">
         <h1>Feed</h1>
-        <button class="btn btn-ghost btn-sm" data-act="open-friends">Friends</button>
+        ${account.emailVerified ? `
+          <div class="row" style="gap:7px">
+            <button class="btn btn-ghost btn-sm" data-act="open-invite">Invite</button>
+            <button class="btn btn-ghost btn-sm" data-act="open-friends">Friends</button>
+          </div>` : ''}
       </div>
       ${feedCache.items.map((it) => `
         <div class="feeditem">
@@ -1422,8 +1560,8 @@ function renderSheet(st) {
     addToSession: sheetAddToSession,
     detail: sheetDetail,
     session: sheetSession,
-    auth: sheetAuth,
     account: sheetAccount,
+    invite: sheetInvite,
     friends: sheetFriends,
   }[sheet.kind];
   if (!body) return '';
@@ -1764,7 +1902,16 @@ function render() {
   const focusKey = act?.dataset?.act;
   const caret = act?.selectionStart ?? null;
 
-  if (!st.profile) {
+  // Order matters: account first, then onboarding, then the app. An account is
+  // required, but only the initial check needs the network — after that the
+  // session persists and everything below works offline.
+  if (CLOUD_ENABLED && !authResolved) {
+    root.innerHTML = `
+      <div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>
+      <div class="empty"><h2>Loading…</h2></div>`;
+  } else if (CLOUD_ENABLED && !account) {
+    root.innerHTML = renderAuthGate();
+  } else if (!st.profile) {
     root.innerHTML = `<div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>${renderSetup()}`;
   } else {
     const inSession = !!st.activeSession;
@@ -1822,6 +1969,14 @@ function render() {
 
 // ═══ Actions ══════════════════════════════════════════════════════════════
 // ═══ Cloud helpers ════════════════════════════════════════════════════════
+
+/** Keep a copy of the account so the app can open signed-in while offline. */
+function cacheAccount() {
+  try {
+    if (account) localStorage.setItem('liftlog.account', JSON.stringify(account));
+    else localStorage.removeItem('liftlog.account');
+  } catch { /* storage unavailable; session is memory-only */ }
+}
 
 async function runSync(opts = {}) {
   if (!account) return;
@@ -1895,18 +2050,71 @@ function promptGoogle() {
   });
 }
 
-/** Restore a signed-in session on load, then sync in the background. */
+/** If we arrived via an invite link, become friends now that we have an account. */
+async function redeemPendingInvite() {
+  if (!pendingInvite || !account) return;
+  try {
+    const r = await api.acceptInvite(pendingInvite.code);
+    authNotice = `You and ${r.friend.displayName} are now friends.`;
+    friendsCache = null;
+  } catch {
+    // An expired or already-used invite is not worth blocking sign-in over.
+  }
+  pendingInvite = null;
+  // Drop the code from the URL so a refresh does not try to redeem it twice.
+  try { history.replaceState(null, '', location.pathname); } catch { /* ignore */ }
+}
+
+/** Read ?invite=CODE and look up who sent it, before sign-in. */
+async function readInviteFromUrl() {
+  const code = new URLSearchParams(location.search).get('invite');
+  if (!code || !CLOUD_ENABLED) return;
+  try {
+    const r = await api.peekInvite(code.toUpperCase());
+    pendingInvite = { code: r.code, from: r.from, note: r.note };
+    authMode = 'signup';   // an invited person almost certainly needs an account
+  } catch { /* expired or bad code: fall through to the normal sign-in screen */ }
+}
+
+/**
+ * Restore a signed-in session on load, then sync in the background.
+ *
+ * Offline is handled deliberately: if there is a stored token but the network
+ * is unreachable, we keep the user signed in with whatever the last known
+ * account was rather than locking them out of the gym.
+ */
 async function restoreAccount() {
-  if (!CLOUD_ENABLED || !(await api.isSignedIn())) return;
+  if (!CLOUD_ENABLED) { authResolved = true; return; }
+
+  await readInviteFromUrl();
+
+  if (!(await api.isSignedIn())) { authResolved = true; render(); return; }
+
+  // Trust the cached account immediately so the app opens instantly, then
+  // confirm with the server.
+  try {
+    account = JSON.parse(localStorage.getItem('liftlog.account') || 'null');
+  } catch { account = null; }
+  authResolved = true;
+  render();
+
   try {
     account = await api.me();
+    cacheAccount();
     render();
+    await redeemPendingInvite();
     await runSync();
     await loadFeed();
   } catch (err) {
-    // An expired or revoked token: clear it rather than showing a broken state.
-    if (err.unauthorized) { await api.logout(); account = null; }
-    else syncState = { ...syncState, online: false };
+    if (err.unauthorized) {
+      // The token was revoked or expired — a real sign-out, not a blip.
+      await api.logout();
+      account = null;
+      cacheAccount();
+    } else {
+      // Offline: stay signed in on the cached account.
+      syncState = { ...syncState, online: false };
+    }
     render();
   }
 }
@@ -2129,15 +2337,55 @@ root.addEventListener('click', async (e) => {
     case 'close-sheet': closeSheet(); break;
 
     // ── Account ──
-    case 'open-auth':
-      authError = null; authNotice = null;
-      openSheet({ kind: 'auth', mode: v || 'signin' });
-      break;
     case 'auth-mode':
       authError = null; authNotice = null;
-      sheet = { ...sheet, mode: v };
+      authMode = v;
       render();
       break;
+
+    case 'forgot-password': {
+      const email = root.querySelector('#au-email')?.value.trim()
+        || prompt('Which email address?') || '';
+      if (!email) break;
+      authError = null; authBusy = true; render();
+      try {
+        const r = await api.forgotPassword(email);
+        authNotice = r.message;
+      } catch (err) {
+        authError = err.offline ? 'No connection. Try again once you reconnect.' : err.message;
+      } finally { authBusy = false; render(); }
+      break;
+    }
+
+    case 'resend-verify': {
+      authBusy = true; authNotice = null; render();
+      try {
+        const r = await api.resendVerification();
+        authNotice = r.sent
+          ? 'Sent. Check your inbox, including spam.'
+          : 'Email is not configured on the server yet — see the setup notes.';
+      } catch (err) {
+        authNotice = err.offline ? 'You are offline right now.' : err.message;
+      } finally { authBusy = false; render(); }
+      break;
+    }
+
+    case 'check-verify': {
+      // They clicked the link elsewhere; re-fetch rather than making them reload.
+      try {
+        account = await api.me();
+        cacheAccount();
+        if (account.emailVerified) {
+          authNotice = null;
+          feedCache = null;
+          await loadFeed();
+        } else {
+          authNotice = 'Not verified yet. Open the link in the email we sent.';
+        }
+      } catch { /* offline; leave state as it is */ }
+      render();
+      break;
+    }
     case 'open-account': openSheet({ kind: 'account' }); break;
 
     case 'do-signin': case 'do-signup': {
@@ -2155,8 +2403,10 @@ root.addEventListener('click', async (e) => {
           ? await api.register({ email, password, username })
           : await api.login({ email, password });
 
+        cacheAccount();
         closeSheet();
         await runSync({ preferLocal: signingUp && hadLocal });
+        await redeemPendingInvite();
         await loadFeed();
       } catch (err) {
         authError = err.offline ? 'No connection. Check your signal and try again.' : err.message;
@@ -2174,8 +2424,10 @@ root.addEventListener('click', async (e) => {
         if (idToken) {
           const hadLocal = !!store.getState().profile;
           account = await api.loginWithGoogle(idToken);
+          cacheAccount();
           closeSheet();
           await runSync({ preferLocal: hadLocal });
+          await redeemPendingInvite();
           await loadFeed();
         }
       } catch (err) {
@@ -2190,12 +2442,57 @@ root.addEventListener('click', async (e) => {
     case 'signout':
       if (confirm('Sign out? Your training data stays on this device.')) {
         await api.logout();
-        account = null; feedCache = null; friendsCache = null;
+        account = null; feedCache = null; friendsCache = null; invitesCache = null;
+        cacheAccount();
         closeSheet();
       }
       break;
 
     case 'sync-now': await runSync(); render(); break;
+
+    // ── Invites ──
+    case 'open-invite':
+      authBusy = false;
+      openSheet({ kind: 'invite' });
+      try { invitesCache = await api.listInvites(); render(); } catch { /* non-essential */ }
+      break;
+
+    case 'send-invite': {
+      const email = root.querySelector('#inv-email')?.value.trim() || '';
+      const note = root.querySelector('#inv-note')?.value.trim() || '';
+      authBusy = true; render();
+      try {
+        const r = await api.createInvite(email || null, note || null);
+        sheet = { ...sheet, created: { link: r.link, emailed: r.emailed, to: email } };
+        invitesCache = await api.listInvites().catch(() => invitesCache);
+      } catch (err) {
+        alert(err.offline ? 'You are offline — invites need a connection.' : err.message);
+      } finally { authBusy = false; render(); }
+      break;
+    }
+
+    case 'new-invite': sheet = { ...sheet, created: null }; render(); break;
+
+    case 'copy-invite':
+      try {
+        await navigator.clipboard.writeText(v);
+        el.textContent = 'Copied';
+        setTimeout(() => { if (el.isConnected) el.textContent = 'Copy link'; }, 1600);
+      } catch {
+        // Clipboard is blocked in some contexts; selecting the text is the fallback.
+        root.querySelector('[data-act="invite-link"]')?.select();
+      }
+      break;
+
+    case 'share-invite':
+      try {
+        await navigator.share({
+          title: 'Progressive Overload',
+          text: 'Train with me — it tells you exactly what to lift and adjusts as you go.',
+          url: v,
+        });
+      } catch { /* the user dismissed the share sheet */ }
+      break;
 
     // ── Friends ──
     case 'open-friends':
@@ -2336,11 +2633,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 await store.load();
-render();
 
-// Restore the signed-in account and sync in the background. Deliberately not
-// awaited: the app is fully usable before the network answers, and must be.
-restoreAccount();
+// The account check gates the first paint, so an already-signed-in user never
+// sees the sign-in screen flash. It resolves from cache immediately when there
+// is a stored session, so this is not a network wait.
+await restoreAccount();
+render();
 
 // Sync when the app comes back to the foreground — the common case is finishing
 // a workout, locking the phone, and opening it again later.

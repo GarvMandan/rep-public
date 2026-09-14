@@ -12,8 +12,17 @@ database_id = "8b5a9fe3-caa9-47da-9f9a-921a5be86645"
 
 [vars]
 # Comma-separated. The first entry is the fallback for non-browser callers.
-ALLOWED_ORIGINS = "https://garvmandan.github.io,http://localhost:5173"
+ALLOWED_ORIGINS = "https://garvmandan.github.io,http://localhost:5173,http://localhost:5195"
 
-# GOOGLE_CLIENT_ID is public by design (it ships in the frontend), so it lives
-# here rather than in secrets.
+# Where the app lives — used to build links inside emails.
+APP_URL = "https://garvmandan.github.io/rep-public"
+
+# From the Google Cloud console. Public by design (it ships in the frontend).
 GOOGLE_CLIENT_ID = ""
+
+# Resend's shared sender works with no domain. Once you verify your own domain,
+# change this to an address on it.
+EMAIL_FROM = "Progressive Overload <onboarding@resend.dev>"
+
+# RESEND_API_KEY is a secret, set with:
+#   npx wrangler secret put RESEND_API_KEY
