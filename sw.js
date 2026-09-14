@@ -8,7 +8,7 @@
 // Bump CACHE when shipping a change. The old cache is deleted on activate, and
 // clients are claimed immediately so the new version takes effect on next load.
 
-const CACHE = 'overload-v1';
+const CACHE = 'overload-v2';
 
 const ASSETS = [
   './',
@@ -20,6 +20,8 @@ const ASSETS = [
   './core/progression.js',
   './core/splits.js',
   './core/plates.js',
+  './core/api.js',
+  './core/config.js',
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -48,8 +50,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
 
+  // Cross-origin requests go straight to the network: fonts, CDNs, and the API
+  // Worker. Caching API responses would serve a stale feed or, worse, a stale
+  // auth check — and writes already bypass via the method check above.
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return; // let fonts/CDNs use the network
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
     caches.match(request).then((hit) => {

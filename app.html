@@ -429,6 +429,104 @@ svg text { font-family: var(--body); }
 .sheethead .x { color: var(--muted); font-size: 20px; padding: 4px 9px; border-radius: 7px; line-height: 1; }
 .sheethead .x:hover { background: var(--surface-2); color: var(--ink); }
 
+/* ── Account & social ──────────────────────────────────────────────────── */
+
+/* Sync state lives in the topbar: a quiet dot, not a banner. Offline is the
+   normal condition in a gym, so it must never look like an error. */
+.syncdot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--faint); transition: background .3s;
+}
+.syncdot.on { background: var(--up); }
+.syncdot.busy { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+.syncdot.off { background: var(--faint); }
+.syncdot.err { background: var(--down); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+.avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex: none;
+  background: var(--surface-2); object-fit: cover;
+  display: grid; place-items: center;
+  font-family: var(--display); font-weight: 700; font-size: 15px; color: var(--muted);
+}
+.avatar.sm { width: 28px; height: 28px; font-size: 12px; }
+
+.authtabs { display: flex; gap: 2px; background: var(--surface-2); border-radius: 8px; padding: 3px; }
+.authtabs button {
+  flex: 1; padding: 10px; border-radius: 6px; font-size: 14px; font-weight: 600;
+  color: var(--muted); text-align: center;
+}
+.authtabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); }
+
+.gbtn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 13px; border-radius: 9px;
+  background: #fff; color: #1f1f1f; font-weight: 600; font-size: 15px;
+}
+.gbtn:hover { filter: brightness(.94); }
+.gbtn svg { width: 18px; height: 18px; flex: none; }
+
+.divider-or {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--faint); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+}
+.divider-or::before, .divider-or::after {
+  content: ''; flex: 1; height: 1px; background: var(--line);
+}
+
+.errbox {
+  padding: 11px 13px; border-radius: 8px; font-size: 13.5px; line-height: 1.45;
+  background: rgba(239,68,68,.1); border-left: 3px solid var(--down); color: var(--ink);
+}
+.okbox {
+  padding: 11px 13px; border-radius: 8px; font-size: 13.5px;
+  background: rgba(74,222,128,.1); border-left: 3px solid var(--up); color: var(--ink);
+}
+
+/* Feed */
+.feeditem { background: var(--surface); border-radius: var(--r); padding: var(--pad); }
+.feedhead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.feedhead .who { flex: 1; min-width: 0; }
+.feedhead .nm { font-weight: 600; font-size: 14.5px; }
+.feedhead .when { font-size: 11.5px; color: var(--faint); }
+
+.feedstats { display: flex; gap: 18px; margin-bottom: 12px; }
+.feedstats div .v {
+  font-family: var(--display); font-size: 20px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.feedstats div .k {
+  font-size: 10px; font-weight: 600; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--faint);
+}
+
+.liftlist { display: flex; flex-direction: column; gap: 1px; border-radius: 8px; overflow: hidden; }
+.liftlist > div {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 9px 12px; background: var(--surface-2); font-size: 13.5px;
+}
+.liftlist .w {
+  font-family: var(--display); font-size: 16px; font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.kudos {
+  display: flex; align-items: center; gap: 7px; margin-top: 12px;
+  padding: 8px 12px; border-radius: 8px; background: var(--surface-2);
+  font-size: 13px; color: var(--muted); align-self: flex-start;
+}
+.kudos.on { background: rgba(228,255,58,.11); color: var(--accent); }
+.kudos b { font-family: var(--display); font-size: 15px; }
+
+/* Friends */
+.personrow {
+  display: flex; align-items: center; gap: 11px;
+  padding: 11px 13px; background: var(--surface-2); border-radius: 8px;
+}
+.personrow .who { flex: 1; min-width: 0; }
+.personrow .nm { font-weight: 600; font-size: 14px; }
+.personrow .un { font-size: 11.5px; color: var(--faint); }
+
 @media (max-width: 430px) {
   .weight { font-size: 62px; }
   .repgrid { gap: 5px; }
@@ -451,6 +549,8 @@ import {
 } from './core/exercises.js';
 import { estimate1RM } from './core/progression.js';
 import { PRESET_INVENTORIES } from './core/plates.js';
+import { createApi, createSync } from './core/api.js';
+import { API_BASE, GOOGLE_CLIENT_ID, CLOUD_ENABLED } from './core/config.js';
 
 // localStorage throws outright in some embedded contexts — fall back to memory
 // rather than taking the whole app down.
@@ -463,6 +563,29 @@ function adapter() {
 
 const store = createStore(adapter());
 const root = document.getElementById('app');
+
+// The API token lives beside the app state, behind the same try/catch — some
+// embedded browsers throw on localStorage rather than returning null.
+const tokenStore = {
+  async get() { try { return localStorage.getItem('liftlog.token') || ''; } catch { return ''; } },
+  async set(v) {
+    try { v ? localStorage.setItem('liftlog.token', v) : localStorage.removeItem('liftlog.token'); }
+    catch { /* memory-only session */ }
+  },
+};
+
+const api = createApi({ baseUrl: API_BASE, tokenStore });
+const sync = createSync({ api, store });
+
+// Account state. `account` is null when signed out — the app is fully usable
+// in that state, which is the point: the cloud is optional, not a gate.
+let account = null;
+let syncState = { syncing: false, online: true, lastError: null, lastAt: null };
+let feedCache = null;
+let friendsCache = null;
+let authBusy = false;
+let authError = null;
+let authNotice = null;
 
 let view = 'today';
 let setupStep = 0;
@@ -1014,6 +1137,280 @@ function renderSettings(st) {
     </div>`;
 }
 
+// ═══ Account ══════════════════════════════════════════════════════════════
+
+const initials = (name) => String(name || '?').trim().slice(0, 2).toUpperCase();
+
+function avatarHTML(user, cls = '') {
+  if (user?.avatarUrl) {
+    return `<img class="avatar ${cls}" src="${esc(user.avatarUrl)}" alt="">`;
+  }
+  return `<div class="avatar ${cls}">${esc(initials(user?.displayName || user?.username))}</div>`;
+}
+
+function relTime(ms) {
+  const s = Math.floor((Date.now() - ms) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  const d = Math.floor(s / 86400);
+  if (d === 1) return 'yesterday';
+  if (d < 7) return `${d}d ago`;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+const GOOGLE_MARK = `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+</svg>`;
+
+/** Sign in / create account. Shown as a sheet, never as a wall. */
+function sheetAuth() {
+  const mode = sheet.mode || 'signin';
+  const isUp = mode === 'signup';
+
+  return `
+    ${sheetHead(isUp ? 'Create an account' : 'Sign in', 'Sync across devices and train with friends')}
+    <div class="stack">
+      <div class="authtabs">
+        <button aria-selected="${!isUp}" data-act="auth-mode" data-v="signin">Sign in</button>
+        <button aria-selected="${isUp}" data-act="auth-mode" data-v="signup">Create account</button>
+      </div>
+
+      ${authError ? `<div class="errbox">${esc(authError)}</div>` : ''}
+      ${authNotice ? `<div class="okbox">${esc(authNotice)}</div>` : ''}
+
+      ${GOOGLE_CLIENT_ID ? `
+        <button class="gbtn" data-act="google-signin" ${authBusy ? 'disabled' : ''}>
+          ${GOOGLE_MARK}<span>Continue with Google</span>
+        </button>
+        <div class="divider-or">or</div>
+      ` : ''}
+
+      <div class="field">
+        <label for="au-email">Email</label>
+        <input id="au-email" type="email" inputmode="email" autocomplete="email"
+               autocapitalize="off" spellcheck="false" placeholder="you@example.com">
+      </div>
+
+      ${isUp ? `
+        <div class="field">
+          <label for="au-user">Username</label>
+          <input id="au-user" autocomplete="username" autocapitalize="off" spellcheck="false"
+                 placeholder="How friends find you">
+          <div class="sm muted">3–20 characters. Letters, numbers and underscores.</div>
+        </div>` : ''}
+
+      <div class="field">
+        <label for="au-pass">Password</label>
+        <input id="au-pass" type="password"
+               autocomplete="${isUp ? 'new-password' : 'current-password'}"
+               placeholder="${isUp ? 'At least 8 characters' : ''}">
+      </div>
+
+      <button class="btn btn-primary btn-block" data-act="${isUp ? 'do-signup' : 'do-signin'}"
+              ${authBusy ? 'disabled' : ''}>
+        ${authBusy ? 'Working…' : isUp ? 'Create account' : 'Sign in'}
+      </button>
+
+      <p class="sm muted" style="margin:0;text-align:center">
+        ${isUp
+          ? 'Your training history on this device is kept and uploaded to the new account.'
+          : 'No account? Create one — this device’s history comes with you.'}
+      </p>
+    </div>`;
+}
+
+function sheetAccount(st) {
+  const stats = store.stats();
+  return `
+    ${sheetHead(account.displayName || account.username, `@${account.username}`)}
+    <div class="stack">
+      <div class="row" style="gap:12px">
+        ${avatarHTML(account)}
+        <div style="flex:1">
+          <div class="sm muted">${esc(account.email || 'Signed in with Google')}</div>
+          <div class="sm" style="color:var(--muted)">
+            ${stats.totalSessions} workout${stats.totalSessions === 1 ? '' : 's'} synced
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="background:var(--surface-2)">
+        <div class="spread">
+          <span class="eyebrow">Sync</span>
+          <span class="sm" style="color:${syncState.lastError ? 'var(--down)' : syncState.online ? 'var(--up)' : 'var(--muted)'}">
+            ${syncState.syncing ? 'Syncing…'
+              : syncState.lastError ? 'Failed'
+              : !syncState.online ? 'Offline'
+              : syncState.lastAt ? `Synced ${relTime(syncState.lastAt)}` : 'Not yet synced'}
+          </span>
+        </div>
+        ${syncState.lastError ? `<div class="sm muted" style="margin-top:6px">${esc(syncState.lastError)}</div>` : ''}
+        <button class="btn btn-ghost btn-sm btn-block" style="margin-top:10px" data-act="sync-now"
+                ${syncState.syncing ? 'disabled' : ''}>
+          ${syncState.syncing ? 'Syncing…' : 'Sync now'}
+        </button>
+      </div>
+
+      <button class="btn btn-ghost btn-block" data-act="open-friends">Friends</button>
+      <button class="btn btn-ghost btn-block btn-danger" data-act="signout">Sign out</button>
+      <p class="sm muted" style="margin:0">
+        Signing out leaves your training data on this device. It stays in your account too.
+      </p>
+    </div>`;
+}
+
+function sheetFriends() {
+  const f = friendsCache;
+  if (!f) return `${sheetHead('Friends')}<div class="empty"><p class="sm">Loading…</p></div>`;
+
+  const person = (u, actions) => `
+    <div class="personrow">
+      ${avatarHTML(u, 'sm')}
+      <div class="who">
+        <div class="nm">${esc(u.displayName || u.username)}</div>
+        <div class="un">@${esc(u.username)}</div>
+      </div>
+      ${actions}
+    </div>`;
+
+  const results = (sheet.results || []).filter((u) => u.friendStatus !== 'accepted');
+
+  return `
+    ${sheetHead('Friends', `${f.friends.length} training with you`)}
+    <div class="stack">
+      <div class="searchbox">
+        <span class="ico">⌕</span>
+        <input type="search" placeholder="Find someone by username"
+               value="${esc(sheet.query || '')}" data-act="friend-search"
+               autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+
+      ${sheet.searching ? '<div class="sm muted">Searching…</div>' : ''}
+
+      ${results.length ? `
+        <div><div class="eyebrow" style="margin-bottom:7px">Results</div>
+          <div class="stack" style="gap:6px">
+            ${results.map((u) => person(u, u.friendStatus === 'pending'
+              ? `<span class="pill pill-hold">${u.outgoing ? 'Sent' : 'Asked you'}</span>`
+              : `<button class="btn btn-sm btn-primary" data-act="add-friend" data-v="${esc(u.username)}">Add</button>`
+            )).join('')}
+          </div></div>` : ''}
+
+      ${f.incoming.length ? `
+        <div><div class="eyebrow" style="margin-bottom:7px">Requests · ${f.incoming.length}</div>
+          <div class="stack" style="gap:6px">
+            ${f.incoming.map((u) => person(u,
+              `<button class="btn btn-sm btn-primary" data-act="accept-friend" data-v="${u.id}">Accept</button>`
+            )).join('')}
+          </div></div>` : ''}
+
+      ${f.friends.length ? `
+        <div><div class="eyebrow" style="margin-bottom:7px">Friends · ${f.friends.length}</div>
+          <div class="stack" style="gap:6px">
+            ${f.friends.map((u) => person(u,
+              `<button class="btn-sm" style="color:var(--faint)" data-act="remove-friend" data-v="${u.id}">Remove</button>`
+            )).join('')}
+          </div></div>`
+        : !results.length && !f.incoming.length
+          ? `<div class="empty"><h2>No friends yet</h2>
+               <p class="sm">Search a username above to send a request.<br>
+               Share yours: <b style="color:var(--muted)">@${esc(account.username)}</b></p></div>`
+          : ''}
+
+      ${f.outgoing.length ? `
+        <div><div class="eyebrow" style="margin-bottom:7px">Sent · ${f.outgoing.length}</div>
+          <div class="stack" style="gap:6px">
+            ${f.outgoing.map((u) => person(u, '<span class="pill pill-flat">Pending</span>')).join('')}
+          </div></div>` : ''}
+    </div>`;
+}
+
+// ═══ Feed ═════════════════════════════════════════════════════════════════
+function renderFeed() {
+  if (!account) {
+    return `
+      <div class="stack">
+        <div class="card" style="text-align:center;padding:30px var(--pad)">
+          <div class="eyebrow">Feed</div>
+          <h1 style="margin:8px 0 6px">Train with friends.</h1>
+          <p class="muted sm" style="margin:0 0 18px;max-width:34ch;margin-inline:auto">
+            Create an account to sync across devices, add friends, and see each other's workouts.
+          </p>
+          <button class="btn btn-primary" data-act="open-auth" data-v="signup">Create an account</button>
+          <button class="btn btn-ghost btn-sm btn-block" style="margin-top:9px" data-act="open-auth" data-v="signin">
+            I already have one
+          </button>
+        </div>
+        <p class="sm muted" style="text-align:center;margin:0">
+          The app works fully without an account — this only adds sync and friends.
+        </p>
+      </div>`;
+  }
+
+  if (!feedCache) {
+    return `<div class="empty"><h2>Loading…</h2></div>`;
+  }
+
+  if (feedCache.error) {
+    return `<div class="stack">
+      <div class="errbox">${esc(feedCache.error)}</div>
+      <button class="btn btn-ghost btn-block" data-act="reload-feed">Try again</button>
+    </div>`;
+  }
+
+  if (!feedCache.items.length) {
+    return `
+      <div class="stack">
+        <div class="empty">
+          <h2>Nothing here yet</h2>
+          <p class="sm">Finish a workout, or add a friend and watch theirs land here.</p>
+        </div>
+        <button class="btn btn-primary btn-block" data-act="open-friends">Find friends</button>
+      </div>`;
+  }
+
+  return `
+    <div class="stack">
+      <div class="spread">
+        <h1>Feed</h1>
+        <button class="btn btn-ghost btn-sm" data-act="open-friends">Friends</button>
+      </div>
+      ${feedCache.items.map((it) => `
+        <div class="feeditem">
+          <div class="feedhead">
+            ${avatarHTML(it.user)}
+            <div class="who">
+              <div class="nm">${it.isMine ? 'You' : esc(it.user.displayName)}</div>
+              <div class="when">${esc(it.name)} · ${relTime(it.finishedAt)}</div>
+            </div>
+          </div>
+
+          <div class="feedstats">
+            <div><div class="v">${fmtVol(it.volume)}<span style="font-size:12px;color:var(--faint)"> lb</span></div>
+              <div class="k">Volume</div></div>
+            <div><div class="v">${it.sets}</div><div class="k">Sets</div></div>
+            <div><div class="v">${it.reps}</div><div class="k">Reps</div></div>
+          </div>
+
+          ${it.topLifts.length ? `
+            <div class="liftlist">
+              ${it.topLifts.map((l) => `
+                <div><span>${esc(l.name)}</span>
+                  <span class="w">${l.weight > 0 ? `${fmtW(l.weight)} × ${l.reps}` : `${l.reps} reps`}</span></div>
+              `).join('')}
+            </div>` : ''}
+
+          <button class="kudos ${it.kudoed ? 'on' : ''}" data-act="kudos" data-v="${it.id}">
+            ${it.kudoed ? '💪' : '👏'} <b>${it.kudos}</b> ${it.kudos === 1 ? 'kudos' : 'kudos'}
+          </button>
+        </div>`).join('')}
+    </div>`;
+}
+
 // ═══ Sheets ═══════════════════════════════════════════════════════════════
 function renderSheet(st) {
   if (!sheet) return '';
@@ -1025,6 +1422,9 @@ function renderSheet(st) {
     addToSession: sheetAddToSession,
     detail: sheetDetail,
     session: sheetSession,
+    auth: sheetAuth,
+    account: sheetAccount,
+    friends: sheetFriends,
   }[sheet.kind];
   if (!body) return '';
   return `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">${body(st)}</div></div>`;
@@ -1368,14 +1768,38 @@ function render() {
     root.innerHTML = `<div class="topbar"><div class="wordmark">PROGRESSIVE<span>·</span>OVERLOAD</div></div>${renderSetup()}`;
   } else {
     const inSession = !!st.activeSession;
-    const body = view === 'progress' ? renderProgress(st) : view === 'plan' ? renderPlan(st) : renderToday(st);
+    const body =
+      view === 'progress' ? renderProgress(st)
+      : view === 'plan' ? renderPlan(st)
+      : view === 'feed' ? renderFeed()
+      : renderToday(st);
+
+    // Four tabs plus an account control is tight on a phone, so the account
+    // button carries the sync state instead of a separate indicator.
+    const dot = !account ? 'off'
+      : syncState.syncing ? 'busy'
+      : syncState.lastError ? 'err'
+      : syncState.online ? 'on' : 'off';
+
+    const tabs = [
+      ['today', inSession ? 'Session' : 'Today'],
+      ['progress', 'Stats'],
+      ['plan', 'Plan'],
+    ];
+    if (CLOUD_ENABLED) tabs.splice(1, 0, ['feed', 'Feed']);
+
     root.innerHTML = `
       <div class="topbar">
-        <div class="wordmark">PO<span>·</span></div>
-        <div class="tabs" role="tablist">
-          ${[['today', inSession ? 'Session' : 'Today'], ['progress', 'Progress'], ['plan', 'Plan']].map(([k, l]) =>
+        <div class="tabs" role="tablist" style="flex:1">
+          ${tabs.map(([k, l]) =>
             `<button class="tab" role="tab" aria-selected="${view === k}" data-act="view" data-v="${k}">${l}</button>`).join('')}
         </div>
+        ${CLOUD_ENABLED ? `
+          <button class="row" style="gap:7px" data-act="${account ? 'open-account' : 'open-auth'}" data-v="signin"
+                  aria-label="${account ? 'Account' : 'Sign in'}">
+            <span class="syncdot ${dot}"></span>
+            ${account ? avatarHTML(account, 'sm') : '<span class="avatar sm">↗</span>'}
+          </button>` : ''}
       </div>
       ${body}
       ${renderSheet(st)}`;
@@ -1397,6 +1821,96 @@ function render() {
 }
 
 // ═══ Actions ══════════════════════════════════════════════════════════════
+// ═══ Cloud helpers ════════════════════════════════════════════════════════
+
+async function runSync(opts = {}) {
+  if (!account) return;
+  syncState = { ...syncState, syncing: true };
+  render();
+
+  const r = await sync.run(opts);
+
+  syncState = {
+    syncing: false,
+    online: !r.offline,
+    lastError: r.error || null,
+    lastAt: r.ok ? Date.now() : syncState.lastAt,
+  };
+  render();
+}
+
+async function loadFeed() {
+  if (!account) return;
+  try {
+    const r = await api.feed();
+    feedCache = { items: r.items, error: null };
+  } catch (err) {
+    feedCache = {
+      items: [],
+      error: err.offline ? 'You are offline. The feed will load when you reconnect.' : err.message,
+    };
+  }
+  render();
+}
+
+async function loadFriends() {
+  if (!account) return;
+  try {
+    friendsCache = await api.friends();
+  } catch {
+    friendsCache = { friends: [], incoming: [], outgoing: [] };
+  }
+  render();
+}
+
+/**
+ * Google Sign-In via the Identity Services library, loaded on demand so the
+ * script is never fetched for users who do not use it.
+ */
+function promptGoogle() {
+  return new Promise((resolve, reject) => {
+    if (!GOOGLE_CLIENT_ID) return reject(new Error('Google sign-in is not configured.'));
+
+    const start = () => {
+      try {
+        google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (res) => resolve(res.credential),
+        });
+        google.accounts.id.prompt((notif) => {
+          if (notif.isNotDisplayed?.() || notif.isSkippedMoment?.()) {
+            reject(new Error('Google sign-in was dismissed.'));
+          }
+        });
+      } catch (e) { reject(e); }
+    };
+
+    if (window.google?.accounts?.id) return start();
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = start;
+    s.onerror = () => reject(new Error('Could not reach Google. Check your connection.'));
+    document.head.appendChild(s);
+  });
+}
+
+/** Restore a signed-in session on load, then sync in the background. */
+async function restoreAccount() {
+  if (!CLOUD_ENABLED || !(await api.isSignedIn())) return;
+  try {
+    account = await api.me();
+    render();
+    await runSync();
+    await loadFeed();
+  } catch (err) {
+    // An expired or revoked token: clear it rather than showing a broken state.
+    if (err.unauthorized) { await api.logout(); account = null; }
+    else syncState = { ...syncState, online: false };
+    render();
+  }
+}
+
 function readDraftInputs() {
   root.querySelectorAll('[data-f]').forEach((el) => {
     const f = el.dataset.f;
@@ -1538,6 +2052,9 @@ root.addEventListener('click', async (e) => {
       clearInterval(restTimer); restUntil = null; coach = null;
       view = 'progress'; render(); window.scrollTo(0, 0);
       if (done) setTimeout(() => alert(`${done.name} logged.\n\nNext time's weights are already set — check Today.`), 60);
+      // Push the finished workout so it reaches friends' feeds. Fire and forget:
+      // it is already saved locally, and sync retries on the next app open.
+      if (account) { runSync().then(() => { feedCache = null; loadFeed(); }); }
       break;
     }
     case 'discard':
@@ -1611,6 +2128,120 @@ root.addEventListener('click', async (e) => {
     case 'session': openSheet({ kind: 'session', sessionId: v }); break;
     case 'close-sheet': closeSheet(); break;
 
+    // ── Account ──
+    case 'open-auth':
+      authError = null; authNotice = null;
+      openSheet({ kind: 'auth', mode: v || 'signin' });
+      break;
+    case 'auth-mode':
+      authError = null; authNotice = null;
+      sheet = { ...sheet, mode: v };
+      render();
+      break;
+    case 'open-account': openSheet({ kind: 'account' }); break;
+
+    case 'do-signin': case 'do-signup': {
+      const email = root.querySelector('#au-email')?.value.trim() || '';
+      const password = root.querySelector('#au-pass')?.value || '';
+      const username = root.querySelector('#au-user')?.value.trim() || '';
+      const signingUp = act === 'do-signup';
+
+      authError = null; authBusy = true; render();
+      try {
+        // Data already on this device belongs to the person creating the
+        // account, so it wins the first sync rather than being replaced.
+        const hadLocal = !!store.getState().profile;
+        account = signingUp
+          ? await api.register({ email, password, username })
+          : await api.login({ email, password });
+
+        closeSheet();
+        await runSync({ preferLocal: signingUp && hadLocal });
+        await loadFeed();
+      } catch (err) {
+        authError = err.offline ? 'No connection. Check your signal and try again.' : err.message;
+      } finally {
+        authBusy = false;
+        render();
+      }
+      break;
+    }
+
+    case 'google-signin': {
+      authError = null; authBusy = true; render();
+      try {
+        const idToken = await promptGoogle();
+        if (idToken) {
+          const hadLocal = !!store.getState().profile;
+          account = await api.loginWithGoogle(idToken);
+          closeSheet();
+          await runSync({ preferLocal: hadLocal });
+          await loadFeed();
+        }
+      } catch (err) {
+        authError = err.message || 'Google sign-in failed.';
+      } finally {
+        authBusy = false;
+        render();
+      }
+      break;
+    }
+
+    case 'signout':
+      if (confirm('Sign out? Your training data stays on this device.')) {
+        await api.logout();
+        account = null; feedCache = null; friendsCache = null;
+        closeSheet();
+      }
+      break;
+
+    case 'sync-now': await runSync(); render(); break;
+
+    // ── Friends ──
+    case 'open-friends':
+      openSheet({ kind: 'friends' });
+      await loadFriends();
+      break;
+
+    case 'add-friend': {
+      try {
+        await api.addFriend(v);
+        await loadFriends();
+        // Reflect the new state in the visible search results too.
+        if (sheet?.results) {
+          sheet.results = sheet.results.map((u) =>
+            u.username === v ? { ...u, friendStatus: 'pending', outgoing: true } : u);
+        }
+        render();
+      } catch (err) { alert(err.message); }
+      break;
+    }
+    case 'accept-friend':
+      try { await api.acceptFriend(v); await loadFriends(); feedCache = null; await loadFeed(); }
+      catch (err) { alert(err.message); }
+      break;
+    case 'remove-friend':
+      if (confirm('Remove this friend? You will stop seeing each other’s workouts.')) {
+        try { await api.removeFriend(v); await loadFriends(); feedCache = null; await loadFeed(); }
+        catch (err) { alert(err.message); }
+      }
+      break;
+
+    // ── Feed ──
+    case 'reload-feed': feedCache = null; render(); await loadFeed(); break;
+    case 'kudos': {
+      // Optimistic: the tap should feel instant, and a failed kudos is harmless.
+      const item = feedCache?.items.find((i) => i.id === v);
+      if (item) {
+        item.kudoed = !item.kudoed;
+        item.kudos += item.kudoed ? 1 : -1;
+        render();
+      }
+      try { await api.toggleKudos(v); }
+      catch { if (item) { item.kudoed = !item.kudoed; item.kudos += item.kudoed ? 1 : -1; render(); } }
+      break;
+    }
+
     // ── Data ──
     case 'export': {
       const blob = new Blob([JSON.stringify(st, null, 2)], { type: 'application/json' });
@@ -1646,9 +2277,33 @@ root.addEventListener('click', async (e) => {
 });
 
 // Search types live; everything else commits on change.
+let friendSearchTimer = null;
 root.addEventListener('input', (e) => {
   const el = e.target.closest('[data-act]');
-  if (el?.dataset.act === 'search') { search = el.value; render(); }
+  if (!el) return;
+
+  if (el.dataset.act === 'search') { search = el.value; render(); }
+
+  if (el.dataset.act === 'friend-search') {
+    const q = el.value;
+    sheet = { ...sheet, query: q };
+    clearTimeout(friendSearchTimer);
+    if (q.trim().length < 2) { sheet.results = []; sheet.searching = false; render(); return; }
+
+    // Debounced so a username search is not one request per keystroke.
+    sheet.searching = true;
+    friendSearchTimer = setTimeout(async () => {
+      try {
+        const r = await api.searchUsers(q);
+        // Guard against a slow response landing after the user typed on.
+        if (sheet?.kind === 'friends' && sheet.query === q) {
+          sheet.results = r.users; sheet.searching = false; render();
+        }
+      } catch {
+        if (sheet?.kind === 'friends') { sheet.searching = false; render(); }
+      }
+    }, 350);
+  }
 });
 
 root.addEventListener('change', async (e) => {
@@ -1682,6 +2337,26 @@ document.addEventListener('keydown', (e) => {
 
 await store.load();
 render();
+
+// Restore the signed-in account and sync in the background. Deliberately not
+// awaited: the app is fully usable before the network answers, and must be.
+restoreAccount();
+
+// Sync when the app comes back to the foreground — the common case is finishing
+// a workout, locking the phone, and opening it again later.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && account && !syncState.syncing) runSync();
+});
+
+// And the moment the signal comes back, which in a gym is often on the way out.
+window.addEventListener('online', () => {
+  syncState = { ...syncState, online: true };
+  if (account) runSync();
+});
+window.addEventListener('offline', () => {
+  syncState = { ...syncState, online: false };
+  render();
+});
 
 // Register the service worker so the app opens and runs with no signal.
 // Failure here is not fatal — it only costs offline support.
